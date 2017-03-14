@@ -1,8 +1,3 @@
-# [Optimze Performance](./index.md)
-## [Performance Analysis Primer](./performance-analysis-primer.md)
-## [Assess System Performance against Key Performance Metrics](./assessing-system-performance-against-kpi.md)
-## [Run Load Tests](./load-testing.md)
-
 ## Anti-patterns
 
 ### [Busy Database](./busy-database/index.md)
