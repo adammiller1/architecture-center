@@ -116,6 +116,7 @@ public async Task RunAsync(CancellationToken cancellationToken)
 - This approach adds some additional complexity to the application. You must handle queuing and dequeuing safely to avoid losing requests in the event of a failure.
 - The application takes a dependency on an additional service for the message queue.
 - The processing environment must be sufficiently scalable to handle the expected workload and meet the required throughput targets.
+- While this approach should improve the overall responsiveness, the tasks that are move to the back end may take longer to complete. 
 
 ## How to detect the problem
 
@@ -138,7 +139,7 @@ The following sections apply these steps to the sample application described ear
 
 Instrument each method to track the duration and resources consumed by each request. Then monitor the application in production. This can provide an overall view of how requests compete with each other. During periods of stress, slow-running resource-hungry requests will likely impact other operations, and this behavior can be observed by monitoring the system and noting the drop off in performance.
 
-The following image shows a monitoring dashboard. (We used [AppDyanamics] for our tests.) Initially, the system has light load. Then users start requesting the `UserProfile` GET method. The performance is reasonably good until other users start issuing requests to the `WorkInFrontEnd` POST method. At that point, response times suddenly increase dramatically (first arrow). The response time only improves after the volume of requests to the `WorkInFrontEnd` controller diminishes (second arrow).
+The following image shows a monitoring dashboard. (We used [AppDyanamics] for our tests.) Initially, the system has light load. Then users start requesting the `UserProfile` GET method. The performance is reasonably good until other users start issuing requests to the `WorkInFrontEnd` POST method. At that point, response times increase dramatically (first arrow). The response time only improves after the volume of requests to the `WorkInFrontEnd` controller diminishes (second arrow).
 
 ![AppDynamics Business Transactions pane showing the effects of the response times of all requests when the WorkInFrontEnd controller is used][AppDynamics-Transactions-Front-End-Requests]
 
@@ -150,7 +151,7 @@ The next image shows some of the metrics gathered to monitor resource utilizatio
 
 At this point, it appears the `Post` method in the `WorkInFrontEnd` controller is a prime candidate for closer examination. Further work in a controlled environment is needed to confirm the hypothesis.
 
-### Perform load testing to identify bad actors
+### Perform load testing 
 
 The next step is to perform tests in a controlled environment. For example, run a series of load tests that include and then omit each request in turn to see the effects.
 
@@ -165,13 +166,7 @@ As more users send POST requests to the `WorkInFrontEnd` controller, the respons
 
 ### Review the source code
 
-The final step is to look at the source code. When the 
-
-In the case of the `Post` method in the `WorkInFrontEnd` controller, the
-development team was aware that this request could take a considerable amount of time
-which is why the processing is performed on a different thread running asynchronously.
-In this way a user issuing the request does not have to wait for processing to
-complete before being able to continue with the next task.
+The final step is to look at the source code. The development team was aware that the `Post` method could take a considerable amount of time, which is why the original implementation used a separate thread.
 
 ```csharp
 public void Post()
@@ -186,49 +181,26 @@ public void Post()
 }
 ```
 
-However, although this approach theoretically improves response time for the user, it
-introduces a small overhead associated with creating and managing a new thread.
-Additionally, the work performed by this method still consumes CPU, memory, and other
-resources. Enabling this process to run asynchronously might actually be damaging to
-performance as users can possibly trigger a large number of these operations
-simultaneously, in an uncontrolled manner. In turn, this has an effect on any other
-operations that the server is attempting to perform. Furthermore, there is a finite
-limit to the number of threads that a server can run, determined by a number of
-factors such as available computing resource capacity and the number of CPU cores.
-When the system reaches its limit, applications are likely to receive an exception
-when they attempt to start a new thread.
+This approach solves the immediate problem, by not waiting inside the `Post` method for a long-running task to complete. But the work performed by this method still consumes CPU, memory, and other resources. Enabling this process to run asynchronously might actually damage performance, as users can trigger a large number of these operations simultaneously, in an uncontrolled manner. There is a limit to the number of threads that a server can run. Past this limit, the application is likely to get an exception when it tries to start a new thread.
 
+That does *not* mean you should avoid all asynchronous operations. Performing an asynchronous await on a network call is a recommended practice, for example. (See [Synchronous I/O antipattern][sync-io]) The problem here is that CPU-intensive work was spawned on another thread. 
 
 ### Implement the solution and verify the result
 
-Running the [sample solution][fullDemonstrationOfSolution] in a production environment
-and using AppDynamics to monitor performance generated the following results. The load
-was similar to that shown earlier, but the response times of requests to the
-`UserProfile` controller is now much faster and the volume of requests overall was
-greatly increased over the same duration (23565 against 2759 earlier). A much bigger
-volume of requests was made to the `WorkInBackground` controller compared to the
-earlier tests due to the increased efficiency of these requests. However, you should
-not compare the throughput and response time for these requests to those shown earlier
-as the work being performed is very different (queuing a request rather than
-performing a time consuming calculation).
+The following image shows performance monitoring after the solution was implemented. The load was similar to that shown earlier, but the response times of requests to the `UserProfile` controller  are now much faster, and the volume of requests increased over the same duration, from 2759 to 23565. 
 
 ![AppDynamics Business Transactions pane showing the effects of the response times of all requests when the WorkInBackground controller is used][AppDynamics-Transactions-Background-Requests]
 
-The CPU and network utilization also illustrate the improved performance. The CPU
-utilization never reached 100% and the volume of network requests handled was far
-greater than earlier and did not tail off until the workload dropped.
+Note that the `WorkInBackground` controller also handled a much larger volume of requests. However, that's not a direct comparison, because the work being performed in this controller is very different from the original coder. The new version simply queues a request, rather than performing a time consuming calculation. The main point is that this method no longer drags down the entire system under load.
+
+CPU and network utilization also show the improved performance. The CPU utilization never reached 100%, and the volume of handled network requests was far greater than earlier, and did not tail off until the workload dropped.
 
 ![AppDynamics metrics showing the CPU and network utilization for the WorkInBackground controller][AppDynamics-Metrics-Background-Requests]
 
-Repeating the controlled load test over 5 minutes for users submitting a mixture of
-all requests against the `UserProfile` and `WorkInBackground` controllers gives the
-following results.
+The following graph shows the results of a load test. The overall volume of requests serviced is greatly improved compared to the the earlier tests.
 
 ![Load-test results for the BackgroundImageProcessing controller][Load-Test-Results-Background]
 
-This graph confirms the improvement in performance of the system as a result of
-offloading the intensive processing to the worker role. The overall volume of requests
-serviced is greatly improved compared to the earlier tests.
 
 Relocating the resource-hungry workload to a separate set of processes should improve
 responsiveness for most requests, but the resource-hungry tasks may take
@@ -250,6 +222,8 @@ mechanism.
 [AppDyanamics]: https://www.appdynamics.com/
 [code-sample]: https://github.com/mspnp/performance-optimization/tree/master/BusyFrontEnd
 [fullDemonstrationOfSolution]: https://github.com/mspnp/performance-optimization/tree/master/BusyFrontEnd
+[sync-io]: ../synchronous-io/index.md
+
 [WebJobs]: http://www.hanselman.com/blog/IntroducingWindowsAzureWebJobs.aspx
 [ComputePartitioning]: https://msdn.microsoft.com/library/dn589773.aspx
 [ServiceBusQueues]: https://msdn.microsoft.com/library/azure/hh367516.aspx
