@@ -17,7 +17,12 @@ Resource-intensive tasks can increase response times for user requests and cause
 
 This problem typically occurs when an application is developed as single monolithic piece of code, with the entire business processing combined into a single tier shared with the presentation layer.
 
-Here’s an example that demonstrates the problem. 
+Here’s an example that demonstrates the problem. The example uses ASP.NET Web API. You can find the complete sample [here][code-sample].
+
+- The `Post` method in the `WorkInFrontEnd` controller implements an HTTP POST operation. This operation simulates a long-running, CPU-intensive task. The work is performed on a separate thread, in an attempt to enable the POST operation to complete quickly and ensure that the caller remains responsive.
+
+- The `Get` method in the `UserProfile` controller implements an HTTP GET operation. This method is much less CPU intensive.
+
 
 ```csharp
 public class WorkInFrontEndController : ApiController
@@ -47,12 +52,6 @@ public class UserProfileController : ApiController
     }
 }
 ```
-
-This example uses ASP.NET Web API. You can find the complete sample [here][code-sample].
-
-- The `Post` method in the `WorkInFrontEnd` controller implements an HTTP POST operation. This operation simulates a long-running, CPU-intensive task. The work is performed on a separate thread, in an attempt to enable the POST operation to complete quickly and ensure that the caller remains responsive.
-
-- The `Get` method in the `UserProfile` controller implements an HTTP GET operation. This method is much less CPU intensive.
 
 The primary concern is the resource requirements of the Post method. Although it puts the work onto a background thread, the work can still consume considerable CPU resources. These resources are shared with other operations being performed by other concurrent users. If a moderate number of users send this request at the same time, overall performance is likely to suffer, slowing down all operations. Users might experience significant latency in the `Get` method, for example.
 
@@ -112,7 +111,7 @@ public async Task RunAsync(CancellationToken cancellationToken)
 }
 ```
 
-### Considerations
+## Considerations
 
 - This approach adds some additional complexity to the application. You must handle queuing and dequeuing safely to avoid losing requests in the event of a failure.
 - The application takes a dependency on an additional service for the message queue.
