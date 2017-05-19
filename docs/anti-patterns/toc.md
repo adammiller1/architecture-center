@@ -1,4 +1,4 @@
-## Anti-patterns
+# Anti-patterns
 
 ## [Busy Database](./busy-database/index.md)
 ## [Busy Front End](./busy-front-end/index.md)
