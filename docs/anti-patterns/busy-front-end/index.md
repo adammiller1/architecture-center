@@ -144,55 +144,30 @@ The following image shows a monitoring dashboard. (We used [AppDyanamics] for ou
 
 ### Examine telemetry data and find correlations
 
-The next image shows some of the metrics gathered by using AppDynamics to monitor the
-resource utilization of the web role hosting the sample application during the same
-interval as the previous graph. Initially, few users are accessing the system, but as
-more users connect the CPU utilization becomes very high (100%) for much of the time,
-so the system is clearly under duress. Additionally, the network I/O rate peaks while
-the CPU utilization rises, and then retreats when the CPU is running at capacity. This
-is because the system is unable to handle more than a relatively small number of
-requests once the CPU is at capacity. As users disconnect, the CPU load tails off.
+The next image shows some of the metrics gathered to monitor resource utilization during the same interval. At first, few users are accessing the system. As more users connect, CPU utilization becomes very high (100%). Also notice that the network I/O rate initialy goes up as the CPU utilization rises. But once CPU usage peaks, network I/O actually goes down. That's because the system can only handle a relatively small number of requests once the CPU is at capacity. As users disconnect, the CPU load tails off.
 
 ![AppDynamics metrics showing the CPU and network utilization][AppDynamics-Metrics-Front-End-Requests]
 
-From the information provided by identifying the points of slow down and the telemetry
-at these points, it would appear that the `WorkInFrontEnd` controller is a prime
-candidate for closer examination, but further work in a controlled environment is
-necessary to confirm this hypothesis.
+At this point, it appears the `Post` method in the `WorkInFrontEnd` controller is a prime candidate for closer examination. Further work in a controlled environment is needed to confirm the hypothesis.
 
-### Performing load testing to identify bad actors
+### Perform load testing to identify bad actors
 
-Having identified the possible source of disruptive requests in the system, you should
-perform tests in a controlled environment to demonstrate any correlations between
-these requests and the overall performance of the system. As an example, you can
-perform a series of load tests that include and then omit each request in turn to see
-the effects.
+The next step is to perform tests in a controlled environment. For example, run a series of load tests that include and then omit each request in turn to see the effects.
 
-The graph below shows the results of a load test performed against an identical
-deployment of the cloud service used for the previous tests. The load test used a
-constant load of 500 users performing the `Get` operation in the `UserProfile`
-controller alongside a step load of users performing requests against the
-`WorkInFrontEnd` controller. Initially, the step load was 0, so the only active users
-were performing the `UserProfile` requests and the system was capable of responding to
-approximately 500 requests per second. After 60 seconds, a load of 100 additional
-users was started, and these users sent POST requests to the `WorkInFrontEnd`
-controller. Almost immediately, the workload sent to the `UserProfile` controller
-dropped to about 150 requests per second. This is due to the way the
-load-test runner functions. It waits for a response before sending the next request,
-so the longer it takes to receive a response the lower the subsequent request rate.
-
-As more users were added (in steps of 100) performing POST requests against the
-`WorkInFrontEnd` controller, the response rate against the `UserProfile` controller
-gradually diminished further. The volume of requests serviced by the `WorkInFrontEnd`
-controller remained relatively constant. The saturation of the system becomes apparent
-as the overall rate of both requests tends towards a steady but low limit.
+The graph below shows the results of a load test performed against an identical deployment of the cloud service used in the previous tests. The test used a constant load of 500 users performing the `Get` operation in the `UserProfile` controller, along with a step load of users performing the `Post` operation in the `WorkInFrontEnd` controller. 
 
 ![Initial load test results for the WorkInFrontEnd controller][Initial-Load-Test-Results-Front-End]
 
+Initially, the step load is 0, so the only active users are performing the `UserProfile` requests. The system is able to respond to approximately 500 requests per second. After 60 seconds, a load of 100 additional users starts sending POST requests to the `WorkInFrontEnd` controller. Almost immediately, the workload sent to the `UserProfile` controller drops to about 150 requests per second. This is due to the way the load-test runner functions. It waits for a response before sending the next request, so the longer it takes to receive a response, the lower the request rate.
+
+As more users send POST requests to the `WorkInFrontEnd` controller, the response rate of the `UserProfile` controller continues to drop. But note that the volume of requests handled by the `WorkInFrontEnd`controller remains relatively constant. The saturation of the system becomes apparent as the overall rate of both requests tends towards a steady but low limit.
+
+
 ### Review the source code
 
-The final stage is to examine the source code for each of the `bad actors`<<RBC: Should this really be formatted as code? It doesn't seem like it needs special formatting. It's not a method name or other code element that I can see, and it doesn't need italics because it's clearly been defined as a special term.>> previously
-identified. In the case of the `Post` method in the `WorkInFrontEnd` controller, the
+The final step is to look at the source code. When the 
+
+In the case of the `Post` method in the `WorkInFrontEnd` controller, the
 development team was aware that this request could take a considerable amount of time
 which is why the processing is performed on a different thread running asynchronously.
 In this way a user issuing the request does not have to wait for processing to
