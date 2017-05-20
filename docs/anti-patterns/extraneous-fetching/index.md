@@ -29,8 +29,7 @@ public async Task<IHttpActionResult> GetAllFieldsAsync()
 }
 ```
 
-Here is an example of retrieving data to perform aggregations calculations. The application calculates total sales by getting
-every record for all orders sold, and then calculating the total sales value from those records.
+Here is an example where the application retrieves data to perform an aggregation, which could be done by the database instead. The application is calculating total sales by getting every record for all orders sold, and then calculating the total sales value from those records.
 
 ```csharp
 public async Task<IHttpActionResult> AggregateOnClientAsync()
@@ -57,7 +56,7 @@ var query = from p in context.Products.AsEnumerable()
 List<Product> products = query.ToList();
 ```
 
-Here the application is trying to find products with a `SellStartDate` older than a week. In most cases, LINQ to Entities would translate a `where` clause to a SQL statement, to be executed by the database. In this case, however, LINQ to Entities cannot map the `AddDays` method to SQL. Instead, every row from the `Product` table is returned, and the results are filtered in memory. The call to `AsEnumerable` gives a hint that there is a problem. That method converts the results to an `IEnumerable` interface. The `IEnumerable`  interface supports filtering, but the filtering is performed on the client side. By default, LINQ to Entities uses `IQueryable`, which passes the responsibility for filtering to the data source. 
+Here the application is trying to find products with a `SellStartDate` more than a week old. In most cases, LINQ to Entities would translate a `where` clause to a SQL statement, to be executed by the database. In this case, however, LINQ to Entities cannot map the `AddDays` method to SQL. Instead, every row from the `Product` table is returned, and the results are filtered in memory. The call to `AsEnumerable` gives a hint that there is a problem. The `AsEnumerable`  method converts the results to an `IEnumerable` interface. The `IEnumerable`  interface supports filtering, but the filtering is performed on the client side. By default, LINQ to Entities uses `IQueryable`, which passes the responsibility for filtering to the data source. 
 
 ## How to fix the problem
 
