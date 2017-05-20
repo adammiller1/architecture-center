@@ -258,7 +258,7 @@ This graph shows the results of load testing. Median response time is measured i
 
 You can use an application performance monitoring (APM) package to capture and analyze the key metrics that might identify chatty I/O. Which metrics are important will depend on the I/O workload. For this example, the interesting I/O requests were the database queries. 
 
-The following image shows results generated using [New Relic APM][new-relic]. The average response time peaked at approximately 5.6 seconds per request during the maximum workload. The system was able to support an average of 410 requests per minute throughout the test.
+The following image shows results generated using [New Relic APM][new-relic]. The average database response time peaked at approximately 5.6 seconds per request during the maximum workload. The system was able to support an average of 410 requests per minute throughout the test.
 
 ![Overview of traffic hitting the AdventureWorks2012 database][databasetraffic]
 
@@ -281,7 +281,7 @@ The next image shows the actual SQL statements that were issued. The query that 
 
 ![Query details for the sample application under test][queries3]
 
-If you are using an O/RM, such as Entity Framework, tracing the SQL queries can provide insight into how the O/RM translates programmatic calls into SQL statements, and indicate areas where data access might be optimized. That said, it's a good practice to trace this information in testing *before* you go into production. Doing so would have revealed the problem earlier. 
+If you are using an O/RM, such as Entity Framework, tracing the SQL queries can provide insight into how the O/RM translates programmatic calls into SQL statements, and indicate areas where data access might be optimized. 
 
 ### Implement the solution and verify the result
 
@@ -289,7 +289,7 @@ Rewriting the call to Entity Framework produced the following results.
 
 ![Key indicators load test results for the chunky API in the chatty I/O sample application][key-indicators-chunky-io]
 
-This load test was performed on the same deployment, using the load profile. This time the graph shows much lower latency. The average request time at 1000 users is between 5 and 6 seconds. The response time is significantly less than 10 seconds, down from nearly a minute.
+This load test was performed on the same deployment, using the same load profile. This time the graph shows much lower latency. The average request time at 1000 users is between 5 and 6 seconds, down from nearly a minute.
 
 This time the system supported an average of 3970 requests per minute, compared to 410 for the earlier test.
 
