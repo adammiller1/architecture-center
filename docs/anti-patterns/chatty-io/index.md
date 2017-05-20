@@ -55,7 +55,7 @@ This example shows the problem explicitly, but sometimes an O/RM can mask the pr
 
 ### Implementing a single logical operation as a series of HTTP requests
 
-This often happens when developers try to follow an object-oriented paradigm, and treat remote objects as if they were local objects in memory. This can result in too many network round trips. For example, the following Web API exposes the individual properties of `User` objects through individual HTTP GET methods. 
+This often happens when developers try to follow an object-oriented paradigm, and treat remote objects as if they were local objects in memory. This can result in too many network round trips. For example, the following web API exposes the individual properties of `User` objects through individual HTTP GET methods. 
 
 ```csharp
 public class UserController : ApiController
@@ -210,12 +210,11 @@ await SaveCustomerListToFileAsync(customers);
 
 - Sometimes it helps to partition the information for an object into two chunks, *frequently accessed data* that accounts for most requests, and *less frequently accessed data* that is used rarely. Often the most frequently accessed data is a relatively small portion of the total data for an object, so returning just that portion can save significant I/O overhead.
 
-- When writing data, avoid locking resources for longer than necessary to reduce the chances of contention during a lengthy operation. If a write operation spans multiple data stores, files, or services, then adopt an eventually consistent approach. See [Data Consistency guidance][data-consistency-guidance].
+- When writing data, avoid locking resources for longer than necessary, to reduce the chances of contention during a lengthy operation. If a write operation spans multiple data stores, files, or services, then adopt an eventually consistent approach. See [Data Consistency guidance][data-consistency-guidance].
 
-- If you buffer data in memory, in order to optimize write requests, the data is vulnerable if the process crashes. If the data rate typically experiences bursts or is relatively sparse, it may be safer to buffering the data in an external durable queue such as [Event Hubs](http://azure.microsoft.com/en-us/services/event-hubs/).
+- If you buffer data in memory before writing it, the data is vulnerable if the process crashes. If the data rate typically has bursts or is relatively sparse, it may be safer to buffer the data in an external durable queue such as [Event Hubs](http://azure.microsoft.com/en-us/services/event-hubs/).
 
-- Consider caching data retrieved from a service or database. This can help to reduce the volume of I/O, by avoiding repeated requests for the same data. For more information, see [Caching best practices][caching-guidance].
-
+- Consider caching data that you retrieve from a service or a database. This can help to reduce the volume of I/O, by avoiding repeated requests for the same data. For more information, see [Caching best practices][caching-guidance].
 
 ## How to detect the problem
 
@@ -231,7 +230,7 @@ You can perform the following steps to help identify the causes of any problems:
 
 4. Gather detailed statistics for each request sent to a data store.
 
-5. Profile the application in the test environment to establish where possible I/O bottlenecks might be occurring. Look for these symptoms:
+5. Profile the application in the test environment to establish where possible I/O bottlenecks might be occurring. Look for any of these symptoms:
 
     - A large number of small I/O requests made to the same file.
     - A large number of small network requests made by an application instance to the same
@@ -244,17 +243,20 @@ If you already have insight into the problem, you may be able to skip some of th
 
 ## Example diagnosis
 
-The following sections apply these steps to the sample code shown earlier that makes too many database calls.
+The following sections apply these steps to the example shown earlier that queries a database.
 
 ### Load test the application
 
-This graph shows the results of load testing. The application was deployed as an Azure App Service web app, using Azure SQL Database. The load test used a simulated step workload of up to 1000 concurrent users. The database was configured with a connection pool supporting up to 1000 concurrent connections, to reduce the chance that contention for connections would affect the results. Median response time is measured in 10s of seconds per request. The graph shows high latency. With a loading of 1000 users, a customer might have to wait for nearly a minute to see the results of a query. 
+This graph shows the results of load testing. Median response time is measured in 10s of seconds per request. The graph shows very high latency: With a load of 1000 users, a user might have to wait for nearly a minute to see the results of a query. 
 
 ![Key indicators load-test results for the chatty I/O sample application][key-indicators-chatty-io]
 
+> [!NOTE]
+> The application was deployed as an Azure App Service web app, using Azure SQL Database. The load test used a simulated step workload of up to 1000 concurrent users. The database was configured with a connection pool supporting up to 1000 concurrent connections, to reduce the chance that contention for connections would affect the results. 
+
 ### Monitor the application
 
-You can use an application performance monitoring (APM) package to capture and analyze the key metrics that might identify chatty I/O. The exact metrics will depend on the I/O workload. For this example, the interesting I/O requests were the database queries. 
+You can use an application performance monitoring (APM) package to capture and analyze the key metrics that might identify chatty I/O. Which metrics are important will depend on the I/O workload. For this example, the interesting I/O requests were the database queries. 
 
 The following image shows results generated using [New Relic APM][new-relic]. The average response time peaked at approximately 5.6 seconds per request during the maximum workload. The system was able to support an average of 410 requests per minute throughout the test.
 
@@ -273,9 +275,9 @@ It turns out that the `GetProductsInSubCategoryAsync` method, shown earlier, per
 ![Query statistics for the sample application under test][queries2]
 
 > [!NOTE]
-> This image shows trace image for the slowest instance of the `GetProductsInSubCategoryAsync` operation performed by the load test. In a production environment, it's useful to examine traces of the slowest instances, to see if there is a pattern that suggests a problem. If you just look at average or fast-running operations, you may be looking at the "happy path" and missing problems that could get dramatically worse under load.
+> This image shows trace information for the slowest instance of the `GetProductsInSubCategoryAsync` operation in the load test. In a production environment, it's useful to examine traces of the slowest instances, to see if there is a pattern that suggests a problem. If you just look at average or fast-running operations, you may be looking at the "happy path" and missing problems that could get dramatically worse under load.
 
-The next image shows the actual SQL statements that were issues. It's clear that the query that fetches price information is run for each individual product in the product subcategory. Using a join would considerably reduce the number of database calls.
+The next image shows the actual SQL statements that were issued. The query that fetches price information is run for each individual product in the product subcategory. Using a join would considerably reduce the number of database calls.
 
 ![Query details for the sample application under test][queries3]
 
