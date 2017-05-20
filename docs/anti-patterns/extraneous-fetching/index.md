@@ -10,59 +10,131 @@ Retrieving more data than is necessary to satisfy a business operation can resul
 
 ## Problem description
 
-This antipattern typically occurs because:
+This antipattern can occur if the application tries to minimize I/O requests by retrieving all of the data that it *might* need. This is often a result of overcompensating for the [Chatty I/O][chatty-io] antipattern. For example, an application might fetch the details for every product in a database. But the user may need just a subset of the details (some details may not be relevant to customers), and probably doesn't need to see *all* of the products. Even if the user is browsing the entire catalog, it would make sense to paginate the results &mdash; showing 20 at a time, for example.
 
-- The application tries to minimize I/O requests by retrieving all of the data that it *might* need. This is often a result of overcompensating for the [Chatty I/O][chatty-io] antipattern. For example, an application might fetch the details for every product in a database. But the user may need just a subset of the details (some details may not be relevant to customers), and probably doesn't need to see *all* of the products. Even if the user is browsing the entire catalog, it would make sense to paginate the results &mdash; showing 20 at a time, for example.
+Another source of this problem is following poor programming or design practices. For example, the following code uses Entity Framework to fetch the complete details for every product, then filters it to return only a subset of the fields, discarding the rest. 
 
-- The application was developed following poor programming or design practices. For example, the following code uses Entity Framework to fetch the complete details for every product, then filters it to return only the information that the user requested, discarding the rest.
-
-    ```csharp
-    public async Task<IHttpActionResult> GetAllFieldsAsync()
+```csharp
+public async Task<IHttpActionResult> GetAllFieldsAsync()
+{
+    using (var context = new AdventureWorksContext())
     {
-        using (var context = new AdventureWorksContext())
-        {
-            // execute the query
-            var products = await context.Products.ToListAsync();
+        // Execute the query. This happens at the database.
+        var products = await context.Products.ToListAsync();
 
-            // project fields from the query results
-            var result = products.Select(p => new ProductInfo { Id = p.ProductId, Name = p.Name });
-
-            return Ok(result);
-        }
+        // Project fields from the query results. This happens in application memory.
+        var result = products.Select(p => new ProductInfo { Id = p.ProductId, Name = p.Name });
+        return Ok(result);
     }
-    ```
-
-- An application retrieves data to perform aggregations calculations. In the following example, the application calculates total sales by getting
-every record for all orders sold, and then calculating the total sales value from those records.
-
-    ```csharp
-    public async Task<IHttpActionResult> AggregateOnClientAsync()
-    {
-        using (var context = new AdventureWorksContext())
-        {
-            // fetch all order totals from the database
-            var orderAmounts = await context.SalesOrderHeaders.Select(soh => soh.TotalDue).ToListAsync();
-
-            // sum the order totals here in the controller
-            var total = orderAmounts.Sum();
-
-            return Ok(total);
-        }
-    }
+}
 ```
 
-- The next example shows a subtle problem caused by the way Entity Framework uses LINQ to Entities. 
+Here is an example of retrieving data to perform aggregations calculations. The application calculates total sales by getting
+every record for all orders sold, and then calculating the total sales value from those records.
 
-    ```csharp
-    var context = new AdventureWorks2012Entities();
-    var query = from p in context.Products.AsEnumerable()
-                where p.SellStartDate < DateTime.Now.AddDays(-7) // AddDays cannot be mapped by LINQ to Entities
-                select ...;
+```csharp
+public async Task<IHttpActionResult> AggregateOnClientAsync()
+{
+    using (var context = new AdventureWorksContext())
+    {
+        // Fetch all order totals from the database.
+        var orderAmounts = await context.SalesOrderHeaders.Select(soh => soh.TotalDue).ToListAsync();
 
-    List<Product> products = query.ToList();
-    ```
+        // Sum the order totals in memory.
+        var total = orderAmounts.Sum();
+        return Ok(total);
+    }
+}
+```
 
-    The application is trying to find products with a `SellStartDate` older than a week. In most cases, LINQ to Entities would translate the `where` to a SQL statement, to be executed by the database. But it can't map the `AddDays` method to SQL. Instead, it returns every row from the `Product` table and filters the list in memory.
+The next example shows a subtle problem caused by the way Entity Framework uses LINQ to Entities. 
+
+```csharp
+var context = new AdventureWorks2012Entities();
+var query = from p in context.Products.AsEnumerable()
+            where p.SellStartDate < DateTime.Now.AddDays(-7) // AddDays cannot be mapped by LINQ to Entities
+            select ...;
+
+List<Product> products = query.ToList();
+```
+
+Here the application is trying to find products with a `SellStartDate` older than a week. In most cases, LINQ to Entities would translate a `where` clause to a SQL statement, to be executed by the database. In this case, however, LINQ to Entities cannot map the `AddDays` method to SQL. Instead, every row from the `Product` table is returned, and the results are filtered in memory. The call to `AsEnumerable` gives a hint that there is a problem. That method converts the results to an `IEnumerable` interface. The `IEnumerable`  interface supports filtering, but the filtering is performed on the client side. By default, LINQ to Entities uses `IQueryable`, which passes the responsibility for filtering to the data source. 
+
+## How to fix the problem
+
+Only fetch the data that you need. Avoid fetching large volumes of data that may quickly become outdated or might be discarded, and only fetch the data needed for the operation being performed. 
+
+
+- In the example that retrieves product information, perform the projection at the
+database rather than fetching and filtering data in the application code.
+
+**C# Web API**
+
+```csharp
+[HttpGet]
+[Route("api/requiredfields")]
+public async Task<IHttpActionResult> GetRequiredFieldsAsync()
+{
+    using (var context = new AdventureWorksContext())
+    {
+        // project fields as part of the query itself
+        var result = await context.Products
+            .Select(p => new ProductInfo {Id = p.ProductId, Name = p.Name})
+            .ToListAsync();
+
+        return Ok(result);
+    }
+}
+```
+
+----------
+
+**Note:** This code is available in the [sample solution][fullDemonstrationOfSolution]
+provided with this antipattern.
+
+----------
+
+- In the example that aggregates information held in a database, perform the
+aggregation in the database rather than in the client application code.
+
+**C# Web API**
+
+```csharp
+[HttpGet]
+[Route("api/aggregateondatabase")]
+public async Task<IHttpActionResult> AggregateOnDatabaseAsync()
+{
+    using (var context = new AdventureWorksContext())
+    {
+        // fetch the sum of all order totals, as computed on the database server
+        var total = await context.SalesOrderHeaders.SumAsync(soh => soh.TotalDue);
+
+        return Ok(total);
+    }
+}
+```
+
+- Wherever possible, ensure that LINQ queries are resolved by using the `IQueryable`
+interface rather than `IEnumerable`. This may be a matter of rephrasing a query to use
+only the features and functions that can be mapped by LINQ to features available in
+the underlying data source, or adding user-defined functions to the data source that
+can perform the required operations on the data before returning it. In the example
+shown earlier, the code can be refactored to remove the problematic `AddDays` function
+from the query, allowing filtering to be performed by the database.
+
+
+**C# Entity Framework**
+
+```csharp
+var context = new AdventureWorks2012Entities();
+
+DateTime dateSince = DateTime.Now.AddDays(-7);
+var query = from p in context.Products
+            where p.SellStartDate < dateSince // AddDays has been factored out. This criterion can be passed to the database by LINQ to Entities
+            select ...;
+
+List<Product> products = query.ToList();
+```
 
 
 ## How to detect the problem
@@ -321,83 +393,6 @@ elsewhere.
 
 ----------
 
-## How to correct the problem
-
-Only fetch the required data, avoid transmitting large volumes of data that
-may quickly become outdated or might be discarded, and only fetch the data appropriate
-to the operation being performed. The following examples describe possible solutions
-to many of the scenarios listed earlier:
-
-- In the example that retrieves product information, perform the projection at the
-database rather than fetching and filtering data in the application code.
-
-**C# Web API**
-
-```csharp
-[HttpGet]
-[Route("api/requiredfields")]
-public async Task<IHttpActionResult> GetRequiredFieldsAsync()
-{
-    using (var context = new AdventureWorksContext())
-    {
-        // project fields as part of the query itself
-        var result = await context.Products
-            .Select(p => new ProductInfo {Id = p.ProductId, Name = p.Name})
-            .ToListAsync();
-
-        return Ok(result);
-    }
-}
-```
-
-----------
-
-**Note:** This code is available in the [sample solution][fullDemonstrationOfSolution]
-provided with this antipattern.
-
-----------
-
-- In the example that aggregates information held in a database, perform the
-aggregation in the database rather than in the client application code.
-
-**C# Web API**
-
-```csharp
-[HttpGet]
-[Route("api/aggregateondatabase")]
-public async Task<IHttpActionResult> AggregateOnDatabaseAsync()
-{
-    using (var context = new AdventureWorksContext())
-    {
-        // fetch the sum of all order totals, as computed on the database server
-        var total = await context.SalesOrderHeaders.SumAsync(soh => soh.TotalDue);
-
-        return Ok(total);
-    }
-}
-```
-
-- Wherever possible, ensure that LINQ queries are resolved by using the `IQueryable`
-interface rather than `IEnumerable`. This may be a matter of rephrasing a query to use
-only the features and functions that can be mapped by LINQ to features available in
-the underlying data source, or adding user-defined functions to the data source that
-can perform the required operations on the data before returning it. In the example
-shown earlier, the code can be refactored to remove the problematic `AddDays` function
-from the query, allowing filtering to be performed by the database.
-
-
-**C# Entity Framework**
-
-```csharp
-var context = new AdventureWorks2012Entities();
-
-DateTime dateSince = DateTime.Now.AddDays(-7);
-var query = from p in context.Products
-            where p.SellStartDate < dateSince // AddDays has been factored out. This criterion can be passed to the database by LINQ to Entities
-            select ...;
-
-List<Product> products = query.ToList();
-```
 
 ## <a name="ConsequencesOfTheSolution"></a>Consequences of the solution
 
