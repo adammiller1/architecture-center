@@ -14,7 +14,7 @@ Network calls and other I/O operations are inherently slow compared to compute t
 
 ### Reading and writing individual records to a database as distinct requests
 
-The following example reads from a database of products. There are three tables, `Product`, `ProductSubcategory`, and `ProductPriceListHistory`. The code retrieves all the products in a subcategory, along with the pricing informating, by executig a series of queries:  
+The following example reads from a database of products. There are three tables, `Product`, `ProductSubcategory`, and `ProductPriceListHistory`. The code retrieves all the products in a subcategory, along with the pricing information, by executig a series of queries:  
 
 1. Query the subcategory from the `ProductSubcategory` table.
 2. Find all products in that subcategory by querying the `Product` table.
@@ -55,7 +55,7 @@ This example shows the problem explicitly, but sometimes an O/RM can mask the pr
 
 ### Implementing a single logical operation as a series of HTTP requests
 
-This often happens when developers try to follow an object-oriented paradigm and handle remote objects like local objects in application memory. This can result in too many network round trips. For example, the following Web API exposes the individual properties of `User` objects as individual HTTP GET methods. 
+This often happens when developers try to follow an object-oriented paradigm, and treat remote objects as if they were local objects in memory. This can result in too many network round trips. For example, the following Web API exposes the individual properties of `User` objects as individual HTTP GET methods. 
 
 ```csharp
 public class UserController : ApiController
@@ -83,7 +83,7 @@ public class UserController : ApiController
 }
 ```
 
-While there's nothing technically wrong with this approach, most clients will probably need to get more than one property from a `User`, resulting in client code like the following. 
+While there's nothing technically wrong with this approach, most clients will probably need to get several properties for each `User`, resulting in client code like the following. 
 
 ```csharp
 HttpResponseMessage response = await client.GetAsync("users/1/username");
@@ -99,7 +99,7 @@ response.EnsureSuccessStatusCode();
 var dob = await response.Content.ReadAsStringAsync();
 ```
 
-**Reading and writing to a file on disk.** 
+### Reading and writing to a file on disk
 
 File I/O involves opening a file and moving to the appropriate point before reading or writing data. When the operation is complete, the file might be closed to save operating system resources. An application that continually reads and writes small amounts of information to a file will generate
 significant I/O overhead. Small write requests can also lead to file fragmentation, slowing subsequent I/O operations still further. 
@@ -147,7 +147,7 @@ public async Task<IHttpActionResult> GetProductCategoryDetailsAsync(int subCateg
 }
 ```
 
-Follow REST design principles for web APIs. Here's a revised version of the web API from the earlier example. Instead of define separate GET methods for each property, there is a single GET method that returns the `User`. This results in a larger response body per request, but each client is likely to make fewer HTTP calls to the API.
+Follow REST design principles for web APIs. Here's a revised version of the web API from the earlier example. Instead of separate GET methods for each property, there is a single GET method that returns the `User`. This results in a larger response body per request, but each client is likely to make fewer API calls.
 
 ```csharp
 public class UserController : ApiController
@@ -166,7 +166,7 @@ response.EnsureSuccessStatusCode();
 var user = await response.Content.ReadAsStringAsync();
 ```
 
-Consider buffering data in memory and then writing the buffered data to a file as a single operation. This approach reduces the overhead from repeatedly opening and closing the file, and helps to reduce fragmentation of the file on disk.
+For file I/O, consider buffering data in memory and then writing the buffered data to a file as a single operation. This approach reduces the overhead from repeatedly opening and closing the file, and helps to reduce fragmentation of the file on disk.
 
 ```csharp
 // Save a list of customer objects to a file
