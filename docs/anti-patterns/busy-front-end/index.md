@@ -54,7 +54,7 @@ public class UserProfileController : ApiController
 
 The primary concern is the resource requirements of the `Post` method. Although it puts the work onto a background thread, the work can still consume considerable CPU resources. These resources are shared with other operations being performed by other concurrent users. If a moderate number of users send this request at the same time, overall performance is likely to suffer, slowing down all operations. Users might experience significant latency in the `Get` method, for example.
 
-## How to correct the problem
+## How to fix the problem
 
 Move processes that consume significant resources to a separate back end. 
 

@@ -1,114 +1,68 @@
 ---
 title: Chatty I/O antipattern
 description: 
-
 author: dragon119
-manager: christb
-
-pnp.series.title: Optimize Performance
 ---
+
 # Chatty I/O antipattern
-[!INCLUDE [header](../../_includes/header.md)]
 
-Network calls and other I/O operations are inherently slow compared to compute tasks.
-Each I/O request typically incorporates significant overhead, and the cumulative effect
-of a large number of requests can have a significant impact on the performance and
-responsiveness of the system.
+A large number of I/O requests can have a significant impact on performance and responsiveness.
 
-Common examples of chatty I/O operations include: <<RBC: The other patterns tend to use this language: "This antipattern typically occurs because:" Is that not applicable here? Should we use consistent terminology?>>
+## Context
 
-- Reading and writing individual records to a database as distinct requests. The
-following code snippet shows part of a controller in a service implemented using Web
-API. The example is based on the AdventureWorks2012 database. In this database, products
-are grouped into subcategories and are held in the `Product` and `ProductSubcategory`
-tables respectively. Pricing information for each product is held in a separate table
-named `ProductListPriceHistory`. The  `GetProductsInSubCategoryAsync` method shown below
-retrieves the details for all products (including price information) for a specified
-subcategory. The method achieves this by using the Entity Framework to perform the
-following operations:
+Network calls and other I/O operations are inherently slow compared to compute tasks. Each I/O request typically incorporates significant overhead, and the cumulative effect of numerous I/O operations can slow down the system.
 
-	- Fetch the details of the specified subcategory from the `ProductSubcategory` table.
+Here are some common causes of chatty I/O:
 
-	- Find all products in the subcategory by querying the `Product` table.
+**Reading and writing individual records to a database as distinct requests.** 
 
-	- For each product, retrieve the price data from the `ProductPriceListHistory` table.
+The following example reads from a database of products. The products are grouped into subcategories, and have pricing information. The code retrieves all the products in a subcategory, including the pricing informating, by performing a series of queries:  
 
-**C# Web API**
+- Query the subcategory from the `ProductSubcategory` table.
+- Find all products in that subcategory by querying the `Product` table.
+- For each product, query the pricing data from the `ProductPriceListHistory` table.
 
-```C#
-public class ChattyProductController : ApiController
+You can find the complete sample [here][code-sample]. 
+
+```csharp
+public async Task<IHttpActionResult> GetProductsInSubCategoryAsync(int subcategoryId)
 {
-    [HttpGet]
-    [Route("chattyproduct/products/{subcategoryId}")]
-    public async Task<IHttpActionResult> GetProductsInSubCategoryAsync(int subcategoryId)
+    using (var context = GetContext())
     {
-        using (var context = GetContext())
+        // Get product subcategory.
+        var productSubcategory = await context.ProductSubcategories
+                .Where(psc => psc.ProductSubcategoryId == subcategoryId)
+                .FirstOrDefaultAsync();
+
+        // Find products in that category.
+        productSubcategory.Product = await context.Products
+            .Where(p => subcategoryId == p.ProductSubcategoryId)
+            .ToListAsync();
+
+        // Find price history for each product.
+        foreach (var prod in productSubcategory.Product)
         {
-            var productSubcategory = await context.ProductSubcategories
-                   .Where(psc => psc.ProductSubcategoryId == subcategoryId)
-                   .FirstOrDefaultAsync();
-
-            if (productSubcategory == null)
-            {
-                // The subcategory was not found.
-                return NotFound();
-            }
-
-            productSubcategory.Product = await context.Products
-                .Where(p => subcategoryId == p.ProductSubcategoryId)
+            int productId = prod.ProductId;
+            var productListPriceHistory = await context.ProductListPriceHistory
+                .Where(pl => pl.ProductId == productId)
                 .ToListAsync();
-
-            foreach (var prod in productSubcategory.Product)
-            {
-                int productId = prod.ProductId;
-
-                var productListPriceHistory = await context.ProductListPriceHistory
-                   .Where(pl => pl.ProductId == productId)
-                   .ToListAsync();
-
-                prod.ProductListPriceHistory = productListPriceHistory;
-            }
-
-            return Ok(productSubcategory);
+            prod.ProductListPriceHistory = productListPriceHistory;
         }
+        return Ok(productSubcategory);
     }
-    ...
 }
 ```
 
-----------
+>[!NOTE]
+> This example shows the problem explicitly, but sometimes an O/RM can mask the problem, if it implicitly fetches child records one at a time. This is called the "N+1 problem".
 
-**Note:** This code forms part of the [ChattyIO sample application][fullDemonstrationOfProblem]. 
+**Implementing a single logical operation as a series of HTTP requests.**
 
-----------
+This often happens when developers try to follow an object-oriented paradigm and handle remote objects like local objects in application memory. This can result in too many network round trips. For example, the following Web API exposes the individual properties of `User` objects as individual HTTP GET methods. 
 
-- Sending a series of requests that constitute a single logical operation to a web
-service. This often occurs when a system attempts to follow an object-oriented paradigm
-and handle remote objects as though they were local items held in application memory.
-This approach can result in an excessive number of network round trips. For example, the
-following Web API exposes the individual properties of `User` objects through a REST
-interface. Each method in the REST interface takes a parameter that identifies a user.
-While this approach is efficient if an application only needs to obtain one selected
-piece of information, in many cases it is likely that the application will actually
-require more than one property of a `User` object, resulting in multiple requests as
-shown in the C# client code snippet.
-
-**C# Web API**
-
-```C#
-public class User
-{
-    public int UserID { get; set; }
-    public string UserName { get; set; }
-    public char? Gender { get; set; }
-    public DateTime? DateOfBirth { get; set; }
-    ...
-}
-...
+```csharp
 public class UserController : ApiController
 {
-    ...
-    // GET: /Users/{id}/UserName
     [HttpGet]
     [Route("users/{id:int}/username")]
     public HttpResponseMessage GetUserName(int id)
@@ -116,7 +70,6 @@ public class UserController : ApiController
         ...
     }
 
-    // GET: /Users/{id}/Gender
     [HttpGet]
     [Route("users/{id:int}/gender")]
     public HttpResponseMessage GetGender(int id)
@@ -124,7 +77,6 @@ public class UserController : ApiController
         ...
     }
 
-    // GET: /Users/{id}/DateOfBirth
     [HttpGet]
     [Route("users/{id:int}/dateofbirth")]
     public HttpResponseMessage GetDateOfBirth(int id)
@@ -134,12 +86,9 @@ public class UserController : ApiController
 }
 ```
 
-**C# client**
-```C#
-var client = new HttpClient();
-client.BaseAddress = new Uri("...");
-...
-// Fetch the data for user 1
+While there's nothing technically wrong with this approach, most clients will probably need to get more than one property from a `User`, resulting in client code like the following. 
+
+```csharp
 HttpResponseMessage response = await client.GetAsync("users/1/username");
 response.EnsureSuccessStatusCode();
 var userName = await response.Content.ReadAsStringAsync();
@@ -151,39 +100,16 @@ var gender = await response.Content.ReadAsStringAsync();
 response = await client.GetAsync("users/1/dateofbirth");
 response.EnsureSuccessStatusCode();
 var dob = await response.Content.ReadAsStringAsync();
-...
 ```
-- Reading and writing to a file on disk. Performing file I/O involves opening a file and
-moving to the appropriate point before reading or writing data. When the operation is
-complete, the file might be closed to save operating system resources. An application that
-continually reads and writes small amounts of information to a file will generate
-significant I/O overhead. Note that repeated small write requests can also lead to file
-fragmentation, slowing subsequent I/O operations still further. The following example
-shows part of an application that creates new *Customer* objects and writes customer
-information to a file. The details of each customer are stored using the
-*SaveCustomerToFileAsync* method immediately after it is created. Note that the
-*FileStream* object utilized for writing to the file is created and destroyed
-automatically as a result of being managed by a *using* block. Each time the *FileStream*
-object is created the specified file is opened, and when the *FileStream* object is
-destroyed the file is closed. If this method is invoked repeatedly as new customers are
-added, the I/O overhead can quickly accumulate.
 
-**C#**
+**Reading and writing to a file on disk.** 
 
-```C#
-[Serializable]
-public class Customer
-{
-    public int Id { get; set; }
-    public string Name { get; set; }
-    ...
-}
-...
-// Create a new customer and save it to a file
-var cust = new Customer(...);
-await SaveCustomerToFileAsync(cust);
-...
-// Save a single customer object to a file
+File I/O involves opening a file and moving to the appropriate point before reading or writing data. When the operation is complete, the file might be closed to save operating system resources. An application that continually reads and writes small amounts of information to a file will generate
+significant I/O overhead. Small write requests can also lead to file fragmentation, slowing subsequent I/O operations still further. 
+
+The following example uses a `FileStream` to write a `Customer` object to a file. Creating the `FileStream` opens the file, and disposing it closes the file. (The `using` statement automatically disposes the `FileStream` object.) If the application calls this method repeatedly as new customers are added, the I/O overhead can accumulate quickly.
+
+```csharp
 private async Task SaveCustomerToFileAsync(Customer cust)
 {
     using (Stream fileStream = new FileStream(CustomersFileName, FileMode.Append))
@@ -199,6 +125,110 @@ private async Task SaveCustomerToFileAsync(Customer cust)
     }
 }
 ```
+
+## How to fix the problem
+
+Reduce the number of I/O requests by packaging the data into larger, fewer requests.
+
+Fetch data from a database as a single query, instead of several smaller queries. Here's a revised version of the code that retrieves product information.
+
+```csharp
+public async Task<IHttpActionResult> GetProductCategoryDetailsAsync(int subCategoryId)
+{
+    using (var context = GetContext())
+    {
+        var subCategory = await context.ProductSubcategories
+                .Where(psc => psc.ProductSubcategoryId == subCategoryId)
+                .Include("Product.ProductListPriceHistory")
+                .FirstOrDefaultAsync();
+
+        if (subCategory == null)
+            return NotFound();
+
+        return Ok(subCategory);
+    }
+}
+```
+
+Follow REST design principles for web APIs. Here's a revised version of the web API from the earlier example. Instead of define separate GET methods for each property, there is a single GET method that returns the `User`. This results in a larger response body per request, but each client is likely to make fewer HTTP calls to the API.
+
+```csharp
+public class UserController : ApiController
+{
+    [HttpGet]
+    [Route("users/{id:int}")]
+    public HttpResponseMessage GetUser(int id)
+    {
+        ...
+    }
+}
+
+// Client code
+HttpResponseMessage response = await client.GetAsync("users/1");
+response.EnsureSuccessStatusCode();
+var user = await response.Content.ReadAsStringAsync();
+```
+
+Consider buffering data in memory and then writing the buffered data to a file as a single operation. This approach reduces the overhead from repeatedly opening and closing the file, and helps to reduce fragmentation of the file on disk.
+
+```csharp
+// Save a list of customer objects to a file
+private async Task SaveCustomerListToFileAsync(List<Customer> customers)
+{
+    using (Stream fileStream = new FileStream(CustomersFileName, FileMode.Append))
+    {
+        BinaryFormatter formatter = new BinaryFormatter();
+        foreach (var cust in customers)
+        {
+            byte[] data = null;
+            using (MemoryStream memStream = new MemoryStream())
+            {
+                formatter.Serialize(memStream, cust);
+                data = memStream.ToArray();
+            }
+            await fileStream.WriteAsync(data, 0, data.Length);
+        }
+    }
+}
+
+// In-memory buffer for customers.
+List<Customer> customers = new List<Customers>();
+
+// Create a new customer and add it to the buffer
+var cust = new Customer(...);
+customers.Add(cust);
+
+// Add more customers to the list as they are created
+...
+
+// Save the contents of the list, writing all customers in a single operation
+await SaveCustomerListToFileAsync(customers);
+```
+
+## Considerations
+
+- When reading data, do not make your I/O requests too large. An application should only
+retrieve the information that it is likely to use. It may be necessary to partition the
+information for an object into two chunks, *frequently accessed data* that accounts for
+90% of the requests and *less frequently accessed data* that is used only 10% of the
+time. When an application requests data, it should be retrieve  the *90%* chunk. The
+*10%* chunk should only be fetched if necessary. If the *10%* chunk constitutes a large
+proportion of the information for an object this approach can save significant I/O overhead.
+
+- When writing data, avoid locking resources for longer than necessary to reduce the
+chances of contention during a lengthy operation. If a write operation spans multiple
+data stores, files, or services then adopt an eventually consistent approach (see
+[Data Consistency guidance][data-consistency-guidance] for details).
+
+- Data buffered in memory to optimize write requests is vulnerable if the application
+crashes and may be lost.  If the data rate is bursty <<RBC: Is there another word we can use here? This isn't a common term (on 24 hits on MSDN library) it seems fairly clear, but I wonder if ESL readers will understand it?>> or relatively sparse, buffering the data in an external durable queue (such as [Event Hubs](http://azure.microsoft.com/en-us/services/event-hubs/)) may be more appropriate to protect against losing a significant amount of in-memory buffered data.
+
+
+As well as buffering data for output, you should also consider caching data retrieved
+from a service. This can help to reduce the volume of I/O being performed by avoiding
+repeated requests for the same data. For more information, see the [Caching Guidance][caching-guidance].
+
+
 
 
 ## How to detect the problem
@@ -360,158 +390,6 @@ store.
 
 - Applications and services becoming I/O bound.
 
-## <a name="HowToCorrectTheProblem"></a>How to correct the problem
-
-Reduce the number of I/O requests by packaging the data that your application reads or
-writes into larger, fewer requests, as illustrated by the following examples:
-
-- In the chatty I/O <<RBC: Should this be ChattyIO (the name of the sample) or chatty I/O a generic reference to the example? I picked the latter because other refs in the doc used this and it's easier to read when you're not pointing them at the actual code file.>> example, rather than retrieving data using separate queries, fetch
-the information required in a single query as shown in the `ChunkyProduct` controller
-below:
-
-**C# Web API**
-
-```C#
-public class ChunkyProductController : ApiController
-{
-    [HttpGet]
-    [Route("chunkyproduct/products/{subCategoryId}")]
-    public async Task<IHttpActionResult> GetProductCategoryDetailsAsync(int subCategoryId)
-    {
-        using (var context = GetContext())
-        {
-            var subCategory = await context.ProductSubcategories
-                  .Where(psc => psc.ProductSubcategoryId == subCategoryId)
-                  .Include("Product.ProductListPriceHistory")
-                  .FirstOrDefaultAsync();
-
-            if (subCategory == null)
-                return NotFound();
-
-            return Ok(subCategory);
-        }
-    }
-    ...
-}
-```
-----------
-
-**Note:** This code is available in the [ChattyIO sample application][fullDemonstrationOfSolution] provided with this antipattern.
-
-----------
-
-- In the `UserController` example shown earlier, rather than exposing individual
-properties of `User` objects through the REST interface, provide a method that retrieves
-an entire `User` object within a single request.
-
-**C# Web API**
-
-```C#
-public class User
-{
-    public int UserID { get; set; }
-    public string UserName { get; set; }
-    public char? Gender { get; set; }
-    public DateTime? DateOfBirth { get; set; }
-}
-...
-public class UserController : ApiController
-{
-    ...
-    // GET: /Users/{id}
-    [HttpGet]
-    [Route("users/{id:int}")]
-    public HttpResponseMessage GetUser(int id)
-    {
-        ...
-    }
-}
-```
-**C# client**
-
-```C#
-var client = new HttpClient();
-client.BaseAddress = new Uri("...");
-...
-// Fetch the data for user 1
-HttpResponseMessage response = await client.GetAsync("users/1");
-response.EnsureSuccessStatusCode();
-var user = await response.Content.ReadAsStringAsync();
-...
-```
-
-- In the file I/O example, you could buffer data in memory and provide a separate
-operation that writes the buffered data to the file as a single operation. This approach
-reduces the overhead associated with repeatedly opening and closing the file, and helps
-to reduce fragmentation of the file on disk.
-
-**C#**
-```C#
-[Serializable]
-public class Customer
-{
-    public int Id { get; set; }
-    public string Name { get; set; }
-    ...
-}
-...
-
-// In-memory buffer for customers
-List<Customer> customers = new List<Customers>();
-...
-
-// Create a new customer and add it to the buffer
-var cust = new Customer(...);
-customers.Add(cust);
-
-// Add further customers to the list as they are created
-...
-
-// Save the contents of the list, writing all customers in a single operation
-await SaveCustomerListToFileAsync(customers);
-...
-
-// Save a list of customer objects to a file
-private async Task SaveCustomerListToFileAsync(List<Customer> customers)
-{
-    using (Stream fileStream = new FileStream(CustomersFileName, FileMode.Append))
-    {
-        BinaryFormatter formatter = new BinaryFormatter();
-        foreach (var cust in customers)
-        {
-            byte[] data = null;
-            using (MemoryStream memStream = new MemoryStream())
-            {
-                formatter.Serialize(memStream, cust);
-                data = memStream.ToArray();
-            }
-            await fileStream.WriteAsync(data, 0, data.Length);
-        }
-    }
-}
-```
-
-As well as buffering data for output, you should also consider caching data retrieved
-from a service. This can help to reduce the volume of I/O being performed by avoiding
-repeated requests for the same data. For more information, see the [Caching Guidance][caching-guidance].
-
-You should consider the following points:
-
-- When reading data, do not make your I/O requests too large. An application should only
-retrieve the information that it is likely to use. It may be necessary to partition the
-information for an object into two chunks, *frequently accessed data* that accounts for
-90% of the requests and *less frequently accessed data* that is used only 10% of the
-time. When an application requests data, it should be retrieve  the *90%* chunk. The
-*10%* chunk should only be fetched if necessary. If the *10%* chunk constitutes a large
-proportion of the information for an object this approach can save significant I/O overhead.
-
-- When writing data, avoid locking resources for longer than necessary to reduce the
-chances of contention during a lengthy operation. If a write operation spans multiple
-data stores, files, or services then adopt an eventually consistent approach (see
-[Data Consistency guidance][data-consistency-guidance] for details).
-
-- Data buffered in memory to optimize write requests is vulnerable if the application
-crashes and may be lost.  If the data rate is bursty <<RBC: Is there another word we can use here? This isn't a common term (on 24 hits on MSDN library) it seems fairly clear, but I wonder if ESL readers will understand it?>> or relatively sparse, buffering the data in an external durable queue (such as [Event Hubs](http://azure.microsoft.com/en-us/services/event-hubs/)) may be more appropriate to protect against losing a significant amount of in-memory buffered data.
 
 ## <a name="Consequences"></a>Consequences of the solution
 
@@ -563,8 +441,8 @@ the chunky API is the same as that retrieved by the chatty API.
 
 - [Caching Guidance][caching-guidance]
 
-[fullDemonstrationOfProblem]: https://github.com/mspnp/performance-optimization/tree/master/ChattyIO
-[fullDemonstrationOfSolution]: https://github.com/mspnp/performance-optimization/tree/master/ChattyIO
+[code-sample]:  https://github.com/mspnp/performance-optimization/tree/master/ChattyIO
+
 [data-consistency-guidance]: http://https://msdn.microsoft.com/library/dn589800.aspx
 [extraneous-fetching]: ../extraneous-fetching/index.md
 [caching-guidance]: https://msdn.microsoft.com/library/dn589802.aspx
@@ -578,3 +456,5 @@ the chunky API is the same as that retrieved by the chatty API.
 [queries4]: _images/DatabaseQueries4.jpg
 [transactiontrace1]: _images/TransactionTrace.jpg
 [transactiontrace2]: _images/TransactionTrace2.jpg
+
+Web API Design best practices
