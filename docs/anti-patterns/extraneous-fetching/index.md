@@ -16,7 +16,7 @@ This antipattern typically occurs because:
 
 - The application was developed following poor programming or design practices. For example, the following code uses Entity Framework to fetch the complete details for every product, then filters it to return only the information that the user requested, discarding the rest.
 
-    ```C#
+    ```csharp
     public async Task<IHttpActionResult> GetAllFieldsAsync()
     {
         using (var context = new AdventureWorksContext())
@@ -32,58 +32,38 @@ This antipattern typically occurs because:
     }
     ```
 
-- An application might retrieve data to perform aggregations or other
-forms of operations. The following sample code (also taken from the sample
-application) calculated the total sales for the company. The application retrieves
-every record for all orders sold, and then calculates the total sales value from these records.
+- An application retrieves data to perform aggregations calculations. In the following example, the application calculates total sales by getting
+every record for all orders sold, and then calculating the total sales value from those records.
 
-![Entity Framework data model showing the SalesOrderHeader table][product-sales-table]
-
-**C# Web API**
-
-```C#
-[HttpGet]
-[Route("api/aggregateonclient")]
-public async Task<IHttpActionResult> AggregateOnClientAsync()
-{
-    using (var context = new AdventureWorksContext())
+    ```csharp
+    public async Task<IHttpActionResult> AggregateOnClientAsync()
     {
-        // fetch all order totals from the database
-        var orderAmounts = await context.SalesOrderHeaders.Select(soh => soh.TotalDue).ToListAsync();
+        using (var context = new AdventureWorksContext())
+        {
+            // fetch all order totals from the database
+            var orderAmounts = await context.SalesOrderHeaders.Select(soh => soh.TotalDue).ToListAsync();
 
-        // sum the order totals here in the controller
-        var total = orderAmounts.Sum();
+            // sum the order totals here in the controller
+            var total = orderAmounts.Sum();
 
-        return Ok(total);
+            return Ok(total);
+        }
     }
-}
 ```
 
-- The application retrieves data from a data source using the `IEnumerable`
-interface. This interface supports filtering and enumeration of data, but the
-filtering is performed on the client side after it has been retrieved from the data
-source. Technologies such as LINQ to Entities (used by the Entity Framework) default
-to retrieving data through the `IQueryable` interface, which passes the responsibility
-for filtering to the data source. However, in some situations an application might
-reference an operation that is only available to the client and not available in the
-data source, requiring that the data be returned through the `IEnumerable` interface
-(by applying the `AsEnumerable` method to an entity collection). The following example
-shows a LINQ to Entities query that retrieves all products where the `SellStartDate`
-column occurs somewhere in the previous week. LINQ to Entities cannot map the `AddDays`
-function to an operation in the database, so the query returns every row from the
-product table to the application where it is filtered. If there are only a small
-number of rows that match this criterion, this is a waste of bandwidth.
+- The next example shows a subtle problem caused by the way Entity Framework uses LINQ to Entities. 
 
-**C# Entity Framework**
+    ```csharp
+    var context = new AdventureWorks2012Entities();
+    var query = from p in context.Products.AsEnumerable()
+                where p.SellStartDate < DateTime.Now.AddDays(-7) // AddDays cannot be mapped by LINQ to Entities
+                select ...;
 
-``` C#
-var context = new AdventureWorks2012Entities();
-var query = from p in context.Products.AsEnumerable()
-            where p.SellStartDate < DateTime.Now.AddDays(-7) // AddDays cannot be mapped by LINQ to Entities
-            select ...;
+    List<Product> products = query.ToList();
+    ```
 
-List<Product> products = query.ToList();
-```
+    The application is trying to find products with a `SellStartDate` older than a week. In most cases, LINQ to Entities would translate the `where` to a SQL statement, to be executed by the database. But it can't map the `AddDays` method to SQL. Instead, it returns every row from the `Product` table and filters the list in memory.
+
 
 ## How to detect the problem
 
@@ -353,7 +333,7 @@ database rather than fetching and filtering data in the application code.
 
 **C# Web API**
 
-```C#
+```csharp
 [HttpGet]
 [Route("api/requiredfields")]
 public async Task<IHttpActionResult> GetRequiredFieldsAsync()
@@ -382,7 +362,7 @@ aggregation in the database rather than in the client application code.
 
 **C# Web API**
 
-```C#
+```csharp
 [HttpGet]
 [Route("api/aggregateondatabase")]
 public async Task<IHttpActionResult> AggregateOnDatabaseAsync()
@@ -408,7 +388,7 @@ from the query, allowing filtering to be performed by the database.
 
 **C# Entity Framework**
 
-``` C#
+```csharp
 var context = new AdventureWorks2012Entities();
 
 DateTime dateSince = DateTime.Now.AddDays(-7);
