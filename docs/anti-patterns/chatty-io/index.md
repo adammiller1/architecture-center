@@ -8,19 +8,17 @@ author: dragon119
 
 A large number of I/O requests can have a significant impact on performance and responsiveness.
 
-## Context
+## Problem description
 
-Network calls and other I/O operations are inherently slow compared to compute tasks. Each I/O request typically incorporates significant overhead, and the cumulative effect of numerous I/O operations can slow down the system.
+Network calls and other I/O operations are inherently slow compared to compute tasks. Each I/O request typically incorporates significant overhead, and the cumulative effect of numerous I/O operations can slow down the system. Here are some common causes of chatty I/O.
 
-Here are some common causes of chatty I/O:
+### Reading and writing individual records to a database as distinct requests
 
-**Reading and writing individual records to a database as distinct requests.** 
+The following example reads from a database of products. There are three tables, `Product`, `ProductSubcategory`, and `ProductPriceListHistory`. The code retrieves all the products in a subcategory, along with the pricing informating, by executig a series of queries:  
 
-The following example reads from a database of products. The products are grouped into subcategories, and have pricing information. The code retrieves all the products in a subcategory, including the pricing informating, by performing a series of queries:  
-
-- Query the subcategory from the `ProductSubcategory` table.
-- Find all products in that subcategory by querying the `Product` table.
-- For each product, query the pricing data from the `ProductPriceListHistory` table.
+1. Query the subcategory from the `ProductSubcategory` table.
+2. Find all products in that subcategory by querying the `Product` table.
+3. For each product, query the pricing data from the `ProductPriceListHistory` table.
 
 You can find the complete sample [here][code-sample]. 
 
@@ -53,10 +51,9 @@ public async Task<IHttpActionResult> GetProductsInSubCategoryAsync(int subcatego
 }
 ```
 
->[!NOTE]
-> This example shows the problem explicitly, but sometimes an O/RM can mask the problem, if it implicitly fetches child records one at a time. This is called the "N+1 problem".
+This example shows the problem explicitly, but sometimes an O/RM can mask the problem, if it implicitly fetches child records one at a time. This is called the "N+1 problem". 
 
-**Implementing a single logical operation as a series of HTTP requests.**
+### Implementing a single logical operation as a series of HTTP requests
 
 This often happens when developers try to follow an object-oriented paradigm and handle remote objects like local objects in application memory. This can result in too many network round trips. For example, the following Web API exposes the individual properties of `User` objects as individual HTTP GET methods. 
 

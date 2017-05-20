@@ -8,20 +8,22 @@ author: dragon119
 
 Performing asynchronous work in a large number of background threads can starve other concurrent foreground tasks of resources, decreasing response times to unacceptable levels.
 
-## Context
+## Problem description
 
-Resource-intensive tasks can increase response times for user requests and cause high latency. One way to improve response times is to offload a resource-intensive task to a separate thread. This strategy lets the application stay responsive while processing happens in the background. However, tasks that run on a background thread still consume resources. If there are too many, they can starve the threads that are handling requests.
+Resource-intensive tasks can increase the response times for user requests and cause high latency. One way to improve response times is to offload a resource-intensive task to a separate thread. This approach lets the application stay responsive while processing happens in the background. However, tasks that run on a background thread still consume resources. If there are too many of them, they can starve the threads that are handling requests.
 
 > [!NOTE]
 > The term *resource* can encompass many things, such as CPU utilization, memory occupancy, and network or disk I/O.
 
 This problem typically occurs when an application is developed as single monolithic piece of code, with the entire business processing combined into a single tier shared with the presentation layer.
 
-Here’s an example using ASP.NET that demonstrates the problem. You can find the complete sample [here][code-sample].
+Here’s an example using ASP.NET that demonstrates the problem.
 
 - The `Post` method in the `WorkInFrontEnd` controller implements an HTTP POST operation. This operation simulates a long-running, CPU-intensive task. The work is performed on a separate thread, in an attempt to enable the POST operation to complete quickly and ensure that the caller remains responsive.
 
 - The `Get` method in the `UserProfile` controller implements an HTTP GET operation. This method is much less CPU intensive.
+
+You can find the complete sample [here][code-sample].
 
 ```csharp
 public class WorkInFrontEndController : ApiController
