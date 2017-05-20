@@ -1,77 +1,38 @@
 ---
 title: Extraneous Fetching anitpattern
 description: 
-
 author: dragon119
-manager: christb
-
-pnp.series.title: Optimize Performance
 ---
-# Extraneous Fetching antipattern
-[!INCLUDE [header](../../_includes/header.md)]
 
-Applications fetch data for query purposes, or to perform some application-specific
-processing. Retrieving data, whether from a remote web service, a database, or a file,
-incurs I/O. Retrieving more data than is necessary to satisfy a business operation can
-result in unnecessary I/O overhead and can reduce responsiveness. In a cloud
-environment supporting multiple concurrent instances of an application, this overhead
-can accumulate to have a significant impact on the performance and scalability of the
-system.
+# Extraneous Fetching antipattern
+
+Retrieving more data than is necessary to satisfy a business operation can result in unnecessary I/O overhead and reduce responsiveness. 
+
+## Problem description
 
 This antipattern typically occurs because:
 
-- The application attempts to minimize the number of I/O requests by retrieving all of
-the data that it *might* need. This is often a result of overcompensating for the
-[Chatty I/O][chatty-io] antipattern. For example, the [sample
-code][fullDemonstrationOfProblem] provided with this antipattern contains part of a
-web application enables a customer to browse products that an organization sells. This
-information is held in the `Products` table in the AdventureWorks2012 database shown
-in the image below. A simple form of the application fetches the complete details for
-every product. This is wasteful on at least three counts:
+- The application tries to minimize I/O requests by retrieving all of the data that it *might* need. This is often a result of overcompensating for the [Chatty I/O][chatty-io] antipattern. For example, an application might fetch the details for every product in a database. But the user may need just a subset of the details (some details may not be relevant to customers), and probably doesn't need to see *all* of the products. Even if the user is browsing the entire catalog, it would make sense to paginate the results &mdash; showing 20 at a time, for example.
 
-	- The customer might not be interested in every detail. They would typically need
-	to see the product name, description, price, dimensions, and possibly a thumbnail
-	image. Other related information such as product ratings, reviews, and detailed
-	images might be useful but could be expensive and wasteful to retrieve unless the
-	customer specifically requests it.
+- The application was developed following poor programming or design practices. For example, the following code uses Entity Framework to fetch the complete details for every product, then filters it to return only the information that the user requested, discarding the rest.
 
-	- Not all of the product details might be relevant to the customer. There could be
-	some properties that are only meaningful to the organization or that should remain
-	hidden from customers.
-
-	- The customer is unlikely to want to view every product that the organization
-	sells.
-
-![Entity Framework data model based on the Product table in the AdventureWorks2012 database][full-product-table]
-
-- The application was developed following poor programming or design practices. For
-example, the following code (taken from the sample application) retrieves product
-information by using the Entity Framework to fetch the complete details for every
-product. The code then filters this information to return only the information that
-the user has requested. The remaining data is discarded. This is clearly wasteful, but
-commonplace.
-
-**C# Web API**
-
-```C#
-[HttpGet]
-[Route("api/allfields")]
-public async Task<IHttpActionResult> GetAllFieldsAsync()
-{
-    using (var context = new AdventureWorksContext())
+    ```C#
+    public async Task<IHttpActionResult> GetAllFieldsAsync()
     {
-        // execute the query
-        var products = await context.Products.ToListAsync();
+        using (var context = new AdventureWorksContext())
+        {
+            // execute the query
+            var products = await context.Products.ToListAsync();
 
-        // project fields from the query results
-        var result = products.Select(p => new ProductInfo { Id = p.ProductId, Name = p.Name });
+            // project fields from the query results
+            var result = products.Select(p => new ProductInfo { Id = p.ProductId, Name = p.Name });
 
-        return Ok(result);
+            return Ok(result);
+        }
     }
-}
-```
+    ```
 
-- Similarly, the application might retrieve data to perform aggregations or other
+- An application might retrieve data to perform aggregations or other
 forms of operations. The following sample code (also taken from the sample
 application) calculated the total sales for the company. The application retrieves
 every record for all orders sold, and then calculates the total sales value from these records.
@@ -516,7 +477,6 @@ more information, see the [Busy Database antipattern][BusyDatabase]
 [MonolithicPersistence]: ../monolithic-persistence/index.md
 [BusyDatabase]: ../busy-database/index.md
 [IEnumerableVsIQueryable]: https://www.sellsbrothers.com/posts/Details/12614
-[full-product-table]:_images/ProductTable.jpg
 [product-sales-table]:_images/SalesOrderHeaderTable.jpg
 [Load-Test-Results-Client-Side1]:_images/LoadTestResultsClientSide1.jpg
 [Load-Test-Results-Client-Side2]:_images/LoadTestResultsClientSide2.jpg
