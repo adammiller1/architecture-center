@@ -121,14 +121,15 @@ public async Task RunAsync(CancellationToken cancellationToken)
 
 ## How to detect the problem
 
-Symptoms of a busy front end include high latency when resource-intensive tasks are being performed. End users are likely to report extended response times and possible failures caused by services timing out. These failures could also return HTTP 500 (Internal Server) errors or HTTP 503 (Service Unavailable) errors. Examine the event logs for the web server, which are likely to contain more detailed information about the causes and circumstances of the errors.
+Symptoms of a busy front end include high latency when resource-intensive tasks are being performed. End users are likely to report extended response times or failures caused by services timing out. These failures could also return HTTP 500 (Internal Server) errors or HTTP 503 (Service Unavailable) errors. Examine the event logs for the web server, which are likely to contain more detailed information about the causes and circumstances of the errors.
 
 You can perform the following steps to help identify this problem:
 
 1. Perform process monitoring of the production system, to identify points when response times slow down.
-2. Examine the telemetry data captured at these points to determine the mix of operations being performed and the resources being used. Find any correlations between poor response times and the volumes and combinations of operations that were happening at those times.
-3. Perform load testing of each possible operation to identify which operations are consuming resources and starving other operations. 
-4. Review the source code for those operations to determine why they might cause excessive resource consumption.
+2. Examine the telemetry data captured at these points to determine the mix of operations being performed and the resources being used. 
+3. Find any correlations between poor response times and the volumes and combinations of operations that were happening at those times.
+4. Perform load testing of each possible operation to identify which operations are consuming resources and starving other operations. 
+5. Review the source code for those operations to determine why they might cause excessive resource consumption.
 
 If you already have insight into the problem, you may be able to skip some of these steps. However, avoid making unfounded or biased assumptions. A thorough analysis can sometimes find unexpected causes of performance problems. 
 

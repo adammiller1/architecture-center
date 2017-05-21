@@ -104,112 +104,53 @@ var query = from p in context.Products
 List<Product> products = query.ToList();
 ```
 
-
-
 ## How to detect the problem
 
-Symptoms of extraneous fetching in an application include high latency and low
-throughput. If the data is retrieved from a data store, then increased contention is
-also probable. End users are likely to report extended response times and possible
-failures caused by services timing out due to increased network traffic and resource
-conflicts in the data store. These failures could return <<RBC: Does this work from a technical perspective? "Manifest themselves as" seemed awkward, and I was concerned that it could be confusing to ESL readers.>> HTTP 500
-(Internal Server) errors or HTTP 503 (Service Unavailable) errors. In these cases, you
-should examine the event logs for the web server, which are likely to contain more
+Symptoms of extraneous fetching include high latency and low throughput. If the data is retrieved from a data store, increased contention is also probable. End users are likely to report extended response times or failures caused by services timing out. These failures could return HTTP 500 (Internal Server) errors or HTTP 503 (Service Unavailable) errors. Examine the event logs for the web server, which are likely to contain more 
 detailed information about the causes and circumstances of the errors.
 
-----------
-
-**Note:** The symptoms of this antipattern and some of the telemetry obtained might
-be very similar to those of the [Monolithic Persistence
-antipattern][MonolithicPersistence]. The causes however are somewhat different, as
-are the possible solutions.
-
-----------
+The symptoms of this antipattern and some of the telemetry obtained might be very similar to those of the [Monolithic Persistence
+antipattern][MonolithicPersistence]. 
 
 You can perform the following steps to help identify the causes of any problems:
 
-1. Identify slow workloads or transactions by performing load-testing, process
-monitoring, or other methods of capturing instrumentation data.
-
-2. Observe any behavioral patterns exhibited by the system. For example, does the
-performance get worse at 5pm each day, and what happens when the workload exceeds a
-specific limit in terms of transactions per second or volume of users?
-
+1. Identify slow workloads or transactions by performing load-testing, process monitoring, or other methods of capturing instrumentation data.
+2. Observe any behavioral patterns exhibited by the system. Are there particular limits in terms of transactions per second or volume of users?
 3. Correlate the instances of slow workloads with behavioral patterns.
-
-4. Identify the source of the data and the data stores being used.
-
-5. For each data source, run lower level telemetry to observe the behavior of
-operations end-to-end using process monitoring, instrumentation, or application
-profiling.
-
+4. Identify the data stores being used. For each data source, run lower level telemetry to observe the behavior of operations.
 6. Identify any slow-running queries that reference these data sources.
+7. Perform a resource-specific analysis of the slow-running queries and ascertain how the data is used and consumed.
 
-7. Perform a resource-specific analysis of the slow-running queries and ascertain how
-the data is used and consumed.
+Look for any of these symptoms:
 
-The following sections apply these steps to the sample application described earlier.
+- Frequent, large I/O requests made to the same resource or data store.
+- Contention in a shared resource or data store.
+- An operation that frequently receives large volumes of data over the network.
+- Applications and services spending significant time waiting for I/O to complete.
 
-----------
+If you already have insight into the problem, you may be able to skip some of these steps. However, avoid making unfounded or biased assumptions. A thorough analysis can sometimes find unexpected causes of performance problems. 
 
-**Note:** If you already have an insight into where problems might lie, you may be
-able to skip some of these steps. However, you should avoid making unfounded or biased
-assumptions. Performing a thorough analysis can sometimes lead to the identification
-of unexpected causes of performance problems. The following sections are formulated to
-help you to examine applications and services systematically.
+## Example diagnosis    
 
-----------
+The following sections apply these steps to the previous examples.
 
-### Identifying slow workloads
+### Identify slow workloads
 
-An initial analysis will likely be based on user reports concerning functionality that
-is running slowly or raising exceptions. Load testing this functionality in a
-controlled test environment could indicate high latency and low throughput. As an
-example, the following performance results were obtained by using a load test that
-simulated up to 400 concurrent users running the `GetAllFieldsAsync` operation in the
-[sample code][fullDemonstrationOfProblem].
+This graph shows performance results from a load test that simulated up to 400 concurrent users running the `GetAllFieldsAsync` method shown earlier. Throughput diminishes slowly as the load increases. Average response time goes up as the workload increases. 
 
 ![Load test results for the GetAllFieldsAsync method][Load-Test-Results-Client-Side1]
 
-Throughput diminished slowly as the load increased, but the average response time
-mirrored the workload (in the graph, the average response time has been magnified by
-100 to make the correlation clear).
-
-Performing a load test for the `AggregateOnClientAsync` operation shows a similar
-pattern. The volume of requests per seconds is reasonably stable (although higher),
-and the average response time increases more slowly with the workload.
+A load test for the `AggregateOnClientAsync` operation shows a similar pattern. The volume of requests is reasonably stable. The average response time increases with the workload, allthough more slowly than the previous graph.
 
 ![Load test results for the AggregateOnClientAsync method][Load-Test-Results-Client-Side2]
 
-Profiling an application in a test environment can help to identify the following
-symptoms that characterize operations that retrieve large amounts of data. The exact
-symptoms will depend on the nature of the resources being accessed, but may include:
+### Observe behavioral patterns
 
-- Frequent, large I/O requests made to the same resource or data store.
+Any correlation between regular periods of high usage and slowing performance can indicate areas of concern. Closely examine the performance profile of functionality that is suspected to be slow running, to determine whether it matches the load testing performed earlier.
 
-- Contention in a shared resource or data store hosting the requested information.
+Load test the same functionality using step-based user loads, to find the point where performance drops significantly or fails completely. If that point falls within the bounds of your expected real-world usage, examine how the functionality is implemented.
 
-- Client applications frequently receiving large volumes of incoming data across the network.
-
-- Applications and services spending significant time waiting for I/O to complete.
-
-### Observing behavioral patterns
-
-Determining whether behavior is influenced by time is a matter of monitoring the
-performance of the production system over an appropriate period and examining the
-usage statistics. Any correlation between regular periods of high usage and slowing
-performance can indicate areas of concern. The performance profile of functionality
-that is suspected to be slow running should be closely examined to determine whether
-it matches that of the load testing performed earlier.
-
-Load testing to destruction (in a test environment) over the same functionality using
-step-based user loads can help highlight the point at which the performance drops
-significantly or fails completely. If the load at which the system fails or performance
-drops to unacceptable levels is within the bounds of that expected at periods of peak
-activity, then the way the functionality is implemented should be examined
-further.
-
-### Correlating instances of slow workloads with behavioral patterns
+### Correlate instances of slow workloads with behavioral patterns
 
 A slow operation is not necessarily a problem if it is not being performed when the
 system is under stress, it is not time critical, and it does not unduly impact the
