@@ -9,12 +9,9 @@ Offloading processing to a database server can cause it to spend a significant p
 
 ## Problem description
 
-Many database systems can run code. Examples include stored procedures and triggers. Often, it's more efficient to perform this processing close to the data, rather than transmitting the data to a client application for processing. 
+Many database systems can run code. Examples include stored procedures and triggers. Often, it's more efficient to perform this processing close to the data, rather than transmitting the data to a client application for processing. However, overusing these features can hurt performance, for several reasons:
 
-However, be careful not to overuse these features.
-
-- They are not always not most efficient option. 
-- The database server may spend so much time in processing, that it negatively affects the performance of client applications. 
+- The database server may spend too much time processing, rather than accepting new client requests and fetching data.
 - A database is usually a shared resource, so it can become a bottleneck during periods of high use.
 - Runtime costs may be excessive if the data store is metered. That's particularly true of managed database services. For example, Azure SQL Database charges for [Database Transaction Units][dtu] (DTUs).
 - Databases have finite capacity to scale up, and it's not trivial to scale a database horizontally. Therefore, it may be better to move processing into a compute resource, such as a VM or App Service app, that can easily scale out.
@@ -22,14 +19,11 @@ However, be careful not to overuse these features.
 This antipattern typically occurs because:
 
 - The database is viewed as a service rather than a repository. An application might use the database server to format data (for example, converting to XML), manipulate string data, or perform complex calculations.
-
-- The expects queries to return results that can be displayed directly. This might involve combining fields, or formatting dates, times, currency, and numeric values according to locale.
-
+- Developers attempted to write queries whose results can be displayed directly. This might involve combining fields, or formatting dates, times, currency, and numeric values according to locale.
 - Developers were trying to correct the [Extraneous Fetching][ExtraneousFetching] antipattern by pushing computations to the database.
+- Stored procedures are being used to encapsulate business logic, perhaps because they are considered easier to maintain and update.
 
-- An application uses stored procedures encapsulate business logic, because they are considered easier to maintain and update.
-
-The following example retrieves the 20 most valuable orders for a specified sales territory and format the results as XML.
+The following example retrieves the 20 most valuable orders for a specified sales territory and formats the results as XML.
 It uses Transact-SQL functions to parse the data and convert the results to XML. You can find the complete sample [here][sample-app].
 
 ```SQL
@@ -84,15 +78,14 @@ ORDER BY soh.[TotalDue] DESC
 FOR XML PATH ('Order'), ROOT('Orders')
 ```
 
-Clearly, this is complex query that utilizes significant processing resources on the database server.
-
+Clearly, this is complex query. As we'll see later, it turns out to use significant processing resources on the database server.
 
 ## How to fix the problem
 
 Move processing from the database server into other application tiers. Ideally, you should limit the database to performing data access
 operations, using only the capabilities that the database is optimized for, such as aggregation in an RDBMS.
 
-For example, the previoous Transact-SQL code can be replaced with the following statement that simply retrieves the data to be processed.
+For example, the previous Transact-SQL code can be replaced with a statement that simply retrieves the data to be processed.
 
 ```SQL
 SELECT
@@ -214,9 +207,9 @@ using (var command = new SqlCommand(...))
 
 ## Considerations
 
-- Many database systems are highly optimized to perform certain types of data processing, such as calculating aggregate values over large datasets. Don't move those types of processing from the database.
+- Many database systems are highly optimized to perform certain types of data processing, such as calculating aggregate values over large datasets. Don't move those types of processing out of the database.
 
-- Do not relocate processing it causes the database to transfer far more data over the network. See the [Extraneous Fetching antipattern][ExtraneousFetching].
+- Do not relocate processing if doing so causes the database to transfer far more data over the network. See the [Extraneous Fetching antipattern][ExtraneousFetching].
 
 - The application tier that requests the data may need to scale out to handle the additional processing load.
 
@@ -242,7 +235,7 @@ The following sections apply these steps to the sample application described ear
 
 ### Monitor the volume of database activity
 
-The following graph shows the results of running a load test against the sample application, using a step load of up to 50 concurrent users. The volmue of requests quickly reaches a limit and stays at that level, while the average response time steadily increases. Note that a logarithmic scale is used for those two metrics.
+The following graph shows the results of running a load test against the sample application, using a step load of up to 50 concurrent users. The volume of requests quickly reaches a limit and stays at that level, while the average response time steadily increases. Note that a logarithmic scale is used for those two metrics.
 
 ![Load-test results for performing processing in the database][ProcessingInDatabaseLoadTest]
 
