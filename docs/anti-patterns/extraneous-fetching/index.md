@@ -6,13 +6,13 @@ author: dragon119
 
 # Extraneous Fetching antipattern
 
-Retrieving more data than is necessary to satisfy a business operation can result in unnecessary I/O overhead and reduce responsiveness. 
+Retrieving more data than needed for a business operation can result in unnecessary I/O overhead and reduce responsiveness. 
 
 ## Problem description
 
-This antipattern can occur if the application tries to minimize I/O requests by retrieving all of the data that it *might* need. This is often a result of overcompensating for the [Chatty I/O][chatty-io] antipattern. For example, an application might fetch the details for every product in a database. But the user may need just a subset of the details (some details may not be relevant to customers), and probably doesn't need to see *all* of the products. Even if the user is browsing the entire catalog, it would make sense to paginate the results &mdash; showing 20 at a time, for example.
+This antipattern can occur if the application tries to minimize I/O requests by retrieving all of the data that it *might* need. This is often a result of overcompensating for the [Chatty I/O][chatty-io] antipattern. For example, an application might fetch the details for every product in a database. But the user may need just a subset of the details (some may not be relevant to customers), and probably doesn't need to see *all* of the products at once. Even if the user is browsing the entire catalog, it would make sense to paginate the results &mdash; showing 20 at a time, for example.
 
-Another source of this problem is following poor programming or design practices. For example, the following code uses Entity Framework to fetch the complete details for every product, then filters it to return only a subset of the fields, discarding the rest. You can find the complete sample [here][sample-app].
+Another source of this problem is following poor programming or design practices. For example, the following code uses Entity Framework to fetch the complete details for every product. Then it filters the results to return only a subset of the fields, discarding the rest. You can find the complete sample [here][sample-app].
 
 ```csharp
 public async Task<IHttpActionResult> GetAllFieldsAsync()
@@ -29,7 +29,7 @@ public async Task<IHttpActionResult> GetAllFieldsAsync()
 }
 ```
 
-Here is an example where the application retrieves data to perform an aggregation, which could be done by the database instead. The application is calculating total sales by getting every record for all orders sold, and then calculating the total sales value from those records. You can find the complete sample [here][sample-app].
+In the next example, the application retrieves data to perform an aggregation that could be done by the database instead. The application calculates total sales by getting every record for all orders sold, and then computing the sum over those records. You can find the complete sample [here][sample-app].
 
 ```csharp
 public async Task<IHttpActionResult> AggregateOnClientAsync()
@@ -46,8 +46,6 @@ public async Task<IHttpActionResult> AggregateOnClientAsync()
 }
 ```
 
-
-
 The next example shows a subtle problem caused by the way Entity Framework uses LINQ to Entities. 
 
 ```csharp
@@ -58,13 +56,15 @@ var query = from p in context.Products.AsEnumerable()
 List<Product> products = query.ToList();
 ```
 
-Here the application is trying to find products with a `SellStartDate` more than a week old. In most cases, LINQ to Entities would translate a `where` clause to a SQL statement, to be executed by the database. In this case, however, LINQ to Entities cannot map the `AddDays` method to SQL. Instead, every row from the `Product` table is returned, and the results are filtered in memory. The call to `AsEnumerable` gives a hint that there is a problem. The `AsEnumerable`  method converts the results to an `IEnumerable` interface. The `IEnumerable`  interface supports filtering, but the filtering is performed on the client side. By default, LINQ to Entities uses `IQueryable`, which passes the responsibility for filtering to the data source. 
+The application is trying to find products with a `SellStartDate` more than a week old. In most cases, LINQ to Entities would translate a `where` clause to a SQL statement that is executed by the database. In this case, however, LINQ to Entities cannot map the `AddDays` method to SQL. Instead, every row from the `Product` table is returned, and the results are filtered in memory. 
+
+The call to `AsEnumerable` is a hint that there is a problem. This method converts the results to an `IEnumerable` interface. Although `IEnumerable` supports filtering, the filtering is done on the *client* side, not the database. By default, LINQ to Entities uses `IQueryable`, which passes the responsibility for filtering to the data source. 
 
 ## How to fix the problem
 
-Only fetch the data that you need. Avoid fetching large volumes of data that may quickly become outdated or might be discarded, and only fetch the data needed for the operation being performed. 
+Avoid fetching large volumes of data that may quickly become outdated or might be discarded, and only fetch the data needed for the operation being performed. 
 
-Instead of getting all the columns from a table and then filtering them, select the columns that you need.
+Instead of getting all the columns from a table and then filtering them, select the columns that you need from the database.
 
 ```csharp
 public async Task<IHttpActionResult> GetRequiredFieldsAsync()
@@ -94,8 +94,7 @@ public async Task<IHttpActionResult> AggregateOnDatabaseAsync()
 }
 ```
 
-When using Entity Framework, ensure that LINQ queries are resolved using the `IQueryable`interface and not `IEnumerable`. You may need to adjust the query to use
-only functions that can be mapped to the data source. The earlier example can be refactored to remove the `AddDays` method from the query, allowing filtering to be done by the database.
+When using Entity Framework, ensure that LINQ queries are resolved using the `IQueryable`interface and not `IEnumerable`. You may need to adjust the query to use only functions that can be mapped to the data source. The earlier example can be refactored to remove the `AddDays` method from the query, allowing filtering to be done by the database.
 
 ```csharp
 DateTime dateSince = DateTime.Now.AddDays(-7); // AddDays has been factored out. 
