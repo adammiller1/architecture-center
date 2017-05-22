@@ -12,7 +12,7 @@ Retrieving more data than is necessary to satisfy a business operation can resul
 
 This antipattern can occur if the application tries to minimize I/O requests by retrieving all of the data that it *might* need. This is often a result of overcompensating for the [Chatty I/O][chatty-io] antipattern. For example, an application might fetch the details for every product in a database. But the user may need just a subset of the details (some details may not be relevant to customers), and probably doesn't need to see *all* of the products. Even if the user is browsing the entire catalog, it would make sense to paginate the results &mdash; showing 20 at a time, for example.
 
-Another source of this problem is following poor programming or design practices. For example, the following code uses Entity Framework to fetch the complete details for every product, then filters it to return only a subset of the fields, discarding the rest. 
+Another source of this problem is following poor programming or design practices. For example, the following code uses Entity Framework to fetch the complete details for every product, then filters it to return only a subset of the fields, discarding the rest. You can find the complete sample [here][sample-app].
 
 ```csharp
 public async Task<IHttpActionResult> GetAllFieldsAsync()
@@ -29,7 +29,7 @@ public async Task<IHttpActionResult> GetAllFieldsAsync()
 }
 ```
 
-Here is an example where the application retrieves data to perform an aggregation, which could be done by the database instead. The application is calculating total sales by getting every record for all orders sold, and then calculating the total sales value from those records.
+Here is an example where the application retrieves data to perform an aggregation, which could be done by the database instead. The application is calculating total sales by getting every record for all orders sold, and then calculating the total sales value from those records. You can find the complete sample [here][sample-app].
 
 ```csharp
 public async Task<IHttpActionResult> AggregateOnClientAsync()
@@ -45,6 +45,8 @@ public async Task<IHttpActionResult> AggregateOnClientAsync()
     }
 }
 ```
+
+
 
 The next example shows a subtle problem caused by the way Entity Framework uses LINQ to Entities. 
 
@@ -104,10 +106,23 @@ var query = from p in context.Products
 List<Product> products = query.ToList();
 ```
 
+## Considerations
+
+- In some cases, you can improve performance by partitioning the horizontally. If different functions access different attributes of the data, horizontal partitioning can to reduce contention. Often, 90% of operations are run against 10% of the data, so spreading this load may improve performance. See [Data partitioning][data-partitioning].
+
+- See if you can take advantage of features built into the data store. For example, SQL databases typically provide aggregate functions. In other types of data store, you may be able to store and update this information separately, as records are added, updated,or removed, so the application doesn't have to the calculation every time.
+
+- If you see that requests are retrieving a large number of fields, examine the source code to determine whether all of these fields are actually necessary. Sometimes these requests are the result of poorly designed `SELECT *` query. 
+
+- Similarly, requests that retrieve a large number of entities may be sign that the application is not filtering data correctly. Verify that all of these entities are actually needed. Use database-side filtering if possible, for example, by using `WHERE` clauses in SQL. 
+
+- For operations that have to support unbounded queries, implement pagination and only fetch a limited number of entities at a time. For example, if a customer is browsing a product catalog, you can show one page of results at a time.
+
+- It's not the case that you should always offload processing to the database. Only use this strategy when the database is designed or optimized to do so. Most database systems are highly optimized for certain functions, but are designed to act as genral-purpose application engines. For more information, see the [Busy Database antipattern][BusyDatabase].
+
 ## How to detect the problem
 
-Symptoms of extraneous fetching include high latency and low throughput. If the data is retrieved from a data store, increased contention is also probable. End users are likely to report extended response times or failures caused by services timing out. These failures could return HTTP 500 (Internal Server) errors or HTTP 503 (Service Unavailable) errors. Examine the event logs for the web server, which are likely to contain more 
-detailed information about the causes and circumstances of the errors.
+Symptoms of extraneous fetching include high latency and low throughput. If the data is retrieved from a data store, increased contention is also probable. End users are likely to report extended response times or failures caused by services timing out. These failures could return HTTP 500 (Internal Server) errors or HTTP 503 (Service Unavailable) errors. Examine the event logs for the web server, which are likely to contain more detailed information about the causes and circumstances of the errors.
 
 The symptoms of this antipattern and some of the telemetry obtained might be very similar to those of the [Monolithic Persistence antipattern][MonolithicPersistence]. 
 
@@ -164,8 +179,6 @@ For each data source, instrument the system to capture the following:
 
 Compare this information against the volume of data being returned by the application to the client. Track the ratio of the volume of data returned by the data store against the volume of data returned to the client. Any large disparity between should be investigated, to determine whether the application fetching extraneous data and performing processing that the data store could handle.
 
-![Observing end-to-end behavior of operations][End-to-End]
-
 You may be able to capture this data by  observing the live system and tracing the lifecycle of each user request, or you can model a series of synthetic workloads and run them against a test system.
 
 The following graphs show the telemetry captured using [New Relic APM][new-relic] during a load test of the `GetAllFieldsAsync` method. Note the difference between the volumes of data received from the database and the corresponding HTTP responses.
@@ -179,130 +192,48 @@ retrieved over 280Kb of data from the database, but the JSON response was a mere
 
 ![Telemetry for the `AggregateOnClientAsync` method][TelemetryAggregateOnClient]
 
-### Identify slow queries
+### Identify and analyze slow queries
 
-Tracing execution and analyzing the application source code and data access logic
-might reveal that a number of different queries are performed as the application runs.
-You should concentrate on those that consume the most resources and take the most time
-to execute. You can add instrumentation to determine the start and completion times
-for many database operations enabling you to work out the duration. However, many data
-stores also provide in-depth information on the way in which queries are performed and
-optimized. For example, the Query Performance pane in the Azure SQL Database
-management portal enables you to select a query and drill into the detailed runtime
-performance information for that query. The figure below shows the query generated by the `GetAllFieldsAsync` operation.
+Look for database queries that consume the most resources and take the most time to execute. You can add instrumentation to find the start and completion times for many database operations. Many data stores also provide in-depth information on how queries are performed and optimized. For example, the Query Performance pane in the Azure SQL Database management portal lets you select a query and view detailed runtime performance information. For example, here is the query generated by the `GetAllFieldsAsync` operation.
 
 ![The Query Details pane in the Windows Azure SQL Database management portal][QueryDetails]
 
-The statistics summarize the resources used by this query.
 
-----------
+## Implement the solution and verify the result
 
-**Note:** The statistics shown in this image were not generated by running the
-load tests, but were obtained by monitoring the system in production. However, the
-statistics are still valid as they give an indication of how the query uses resources
-and this is not dependent on whether the system is under test at the time.
-
-----------
-
-### Performing a resource-specific analysis of the slow-running queries
-
-Examining the queries frequently performed against a data source, and the way an application uses this information, can provide insight into how key operations
-might be speeded up. In some cases, it may be advisable to partition resources
-horizontally if different attributes of the data (columns in a relational table, or
-fields in a NoSQL store) are accessed separately by different functions,this can help
-to reduce contention. Often 90% of operations are run against 10% of the data held in
-the various data sources, so spreading this load may improve performance.
-
-Depending on the nature of the data store, you may be able to exploit the features
-that it implements to efficiently store and retrieve information. For example, if an
-application requires an aggregation over a number of items (such as a count, sum, min
-or max operation), SQL databases typically provide aggregate functions that can
-perform these operations without requiring that an application fetches all of the data
-and implement the calculation itself. In other types of data store, it may be possible
-to maintain this information separately within the store as records are added,
-updated, or removed, eliminating the requirement of an application to fetch a
-potentially large amount of data and perform the calculation itself.
-
-If you observe requests that retrieve a large number of fields, examine the underlying
-source code to determine whether all of these fields are actually necessary. Sometimes
-these requests are the result of ill-advised `SELECT *` operations, or misplaced
-`.Include` operations in LINQ queries. Similarly, requests that retrieve a large
-number of entities (rows in a SQL Server database) may indicate an application
-that is not filtering data correctly. Verify that all of these entities are actually
-necessary, and implement database-side filtering if possible (for example, using a
-`WHERE` clause in an SQL statement.) For operations that have to support unbounded
-queries, the system should implement pagination and only fetch a limited number (a
-*page*) of entities at a time.
-
-----------
-
-**Note:** If analysis shows that none of these situations apply, then extraneous
-fetching is unlikely to be the cause of poor performance and you should look
-elsewhere.
-
-----------
-
-
-## <a name="ConsequencesOfTheSolution"></a>Consequences of the solution
-
-The system should spend less time waiting for I/O, network traffic should be
-diminished, and contention for shared data resources should be decreased. This should
-show an improvement in response time and throughput in an application.
-Performing load testing against the `GetRequiredFieldsAsync` method in the [sample solution][fullDemonstrationOfSolution] shows the following results:
+After changing the `GetRequiredFieldsAsync` method to use a SELECT statement on the database side, load testing showed the following results.
 
 ![Load test results for the GetRequiredFieldsAsync method][Load-Test-Results-Database-Side1]
 
-This load test was performed on the same deployment and using the same simulated
-workload of 400 concurrent users as before. The graph shows much lower latency, the
-response time rises with load to approximately 1.3 seconds compared to 4 seconds in
-the previous case. The throughput is also higher at 350 requests per second compared
-to 100 earlier. These changes are apparent from the telemetry gathered while the test
-was running.
+This load test used the same deployment and the same simulated workload of 400 concurrent users as before. The graph shows much lower latency. Response time rises with load to approximately 1.3 seconds, compared to 4 seconds in the previous case. The throughput is also higher at 350 requests per second compared to 100 earlier. The volume of data retrieved from the database now closely matches the size of the HTTP response messages.
 
 ![Telemetry for the `GetRequiredFieldsAsync` method][TelemetryRequiredFields]
-
-The volume of data retrieved from the database now closely matches the size of the
-HTTP response messages sent back to the client applications.
 
 Load testing using the `AggregateOnDatabaseAsync` method generates the following results:
 
 ![Load test results for the AggregateOnDatabaseAsync method][Load-Test-Results-Database-Side2]
 
-The average response time is now minimal. This is an order of magnitude improvement
-in performance, caused primarily by the vast reduction in I/O from the database.
+The average response time is now minimal. This is an order of magnitude improvement in performance, caused primarily by the large reduction in I/O from the database. 
 
-The image below shows the corresponding telemetry for the `AggregateOnDatabaseAsync`
-method.
+Here is the corresponding telemetry for the `AggregateOnDatabaseAsync` method. The amount of data retrieved from the database was vastly reduced, from over 280Kb per transaction to 53 bytes. As a result, the maximum sustained number of requests per minute was raised from around 2,000 to over 25,000.
 
 ![Telemetry for the `AggregateOnDatabaseAsync` method][TelemetryAggregateInDatabaseAsync]
 
-The amount of data retrieved from the database was vastly reduced, from over 280Kb per
-transaction to 53 bytes. Consequently, the maximum sustained number of requests per
-minute was raised from around 2,000 to over 25,000.
-
-----------
-
-**Note:** The solution to this antipattern does not imply that you should always
-offload processing to the database. You should only perform this strategy where the
-database is designed or optimized to do so. Databases are intended to manipulate the
-data that they contain very efficiently, but in many cases they are not designed to
-act as complete <<RBC: Normally you'd say fullfledged, but even that seems like the easiest to parse for ESL readers. Does this work?>> application engines. Using the processing power of a database
-server inappropriately can cause contention and slow down database operations. For
-more information, see the [Busy Database antipattern][BusyDatabase]
-
-----------
 
 ## Related resources
 
+- [Busy Database antipattern][BusyDatabase]
+- [Data partitioning guidance][data-partitioning]
+
+
+[BusyDatabase]: ../busy-database/index.md
+[data-partitioning]: ../../best-practices/data-partitioning.md
 [new-relic]: https://newrelic.com/application-monitoring
 
-
-[fullDemonstrationOfProblem]: https://github.com/mspnp/performance-optimization/tree/master/ExtraneousFetching
+[sample-app]: https://github.com/mspnp/performance-optimization/tree/master/ExtraneousFetching
 
 [chatty-io]: ../chatty-io/index.md
 [MonolithicPersistence]: ../monolithic-persistence/index.md
-[BusyDatabase]: ../busy-database/index.md
-[product-sales-table]:_images/SalesOrderHeaderTable.jpg
 [Load-Test-Results-Client-Side1]:_images/LoadTestResultsClientSide1.jpg
 [Load-Test-Results-Client-Side2]:_images/LoadTestResultsClientSide2.jpg
 [Load-Test-Results-Database-Side1]:_images/LoadTestResultsDatabaseSide1.jpg
