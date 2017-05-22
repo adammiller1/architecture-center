@@ -107,17 +107,18 @@ List<Product> products = query.ToList();
 
 ## Considerations
 
-- In some cases, you can improve performance by partitioning the horizontally. If different functions access different attributes of the data, horizontal partitioning can to reduce contention. Often, 90% of operations are run against 10% of the data, so spreading this load may improve performance. See [Data partitioning][data-partitioning].
+- In some cases, you can improve performance by partitioning data horizontally. If different operations access different attributes of the data, horizontal partitioning can to reduce contention. Often, most operations are run against a small subset of the data, so spreading this load may improve performance. See [Data partitioning][data-partitioning].
 
-- See if you can take advantage of features built into the data store. For example, SQL databases typically provide aggregate functions. In other types of data store, you may be able to store and update this information separately, as records are added, updated,or removed, so the application doesn't have to the calculation every time.
+- For operations that have to support unbounded queries, implement pagination and only fetch a limited number of entities at a time. For example, if a customer is browsing a product catalog, you can show one page of results at a time.
+
+- When possible, take advantage of features built into the data store. For example, SQL databases typically provide aggregate functions. In other types of data store, you may be able to store and update this information separately, as records are added, updated,or removed, so the application doesn't have to the calculation every time.
 
 - If you see that requests are retrieving a large number of fields, examine the source code to determine whether all of these fields are actually necessary. Sometimes these requests are the result of poorly designed `SELECT *` query. 
 
 - Similarly, requests that retrieve a large number of entities may be sign that the application is not filtering data correctly. Verify that all of these entities are actually needed. Use database-side filtering if possible, for example, by using `WHERE` clauses in SQL. 
 
-- For operations that have to support unbounded queries, implement pagination and only fetch a limited number of entities at a time. For example, if a customer is browsing a product catalog, you can show one page of results at a time.
+- However, offloading processing to the database is not always the best option. Only use this strategy when the database is designed or optimized to do so. Most database systems are highly optimized for certain functions, but are not designed to act as general-purpose application engines. For more information, see the [Busy Database antipattern][BusyDatabase].
 
-- It's not the case that you should always offload processing to the database. Only use this strategy when the database is designed or optimized to do so. Most database systems are highly optimized for certain functions, but are designed to act as genral-purpose application engines. For more information, see the [Busy Database antipattern][BusyDatabase].
 
 ## How to detect the problem
 
