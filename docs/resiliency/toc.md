@@ -5,7 +5,6 @@
 
 ## Additional guidance
 ### [Disaster recovery](./disaster-recovery-azure-applications.md)
-### [Disaster recovery and high availability](./disaster-recovery-high-availability-azure-applications.md)
 ### [High availability](./high-availability-azure-applications.md)
 ### [High availability checklist](./high-availability-checklist.md)
 ### [Recovery from data corruption or accidental deletion](./recovery-data-corruption.md)
