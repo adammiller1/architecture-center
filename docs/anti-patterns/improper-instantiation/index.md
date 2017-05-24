@@ -1,102 +1,110 @@
 ---
 title: Improper Instantiation antipattern
 description: 
-
 author: dragon119
-manager: christb
-
-pnp.series.title: Optimize Performance
 ---
+
 # Improper Instantiation antipattern
-[!INCLUDE [header](../../_includes/header.md)]
 
-Many .NET Framework libraries provide abstractions about <<RBC: I suspect this is just a pet peeve of mine. I hate using the word "around" this way. I think about or surrounding are more precise, but it's one of those changes that I can live with you rejecting.>> external resources.
-Internally, these classes typically manage their own connections to these external
-resources, effectively acting as brokers that clients can use to request access to a
-resource. Examples of such classes frequently used by Azure applications include
-`System.Net.Http.HttpClient` to communicate with a web service using the HTTP
-protocol, `Microsoft.ServiceBus.Messaging.QueueClient` for posting and receiving
-messages to a Service Bus queue, `Microsoft.Azure.Documents.Client.DocumentClient`
-for connecting to an Azure DocumentDB instance, and
-`StackExchange.Redis.ConnectionMultiplexer` for accessing Azure Redis Cache.
 
-These *broker* classes can be expensive to create. Instead, they are intended to be
-instantiated once and reused throughout the life of an application. However, it is
-common to misunderstand how these classes are intended to be used, and instead treat
-them as resources that should be acquired only as necessary and released quickly, as
-shown by the following code snippet that demonstrates the use of the `HttpClient`
-class in a web API controller. The `GetProductAsync` method retrieves product 
-information from a remote web service.
 
-**C# Web API**
-``` C#
+## Problem description
+
+Many .NET Framework libraries provide abstractions of external resources. Internally, these classes typically manage their own connections to the resource, acting as brokers that clients can use to access the resource. Here are some examples of this type of broker class that are relevant to Azure applications:
+
+- `System.Net.Http.HttpClient`. Communicate with a web service using HTTP.
+- `Microsoft.ServiceBus.Messaging.QueueClient`. Posting and receiving messages to a Service Bus queue. 
+- `Microsoft.Azure.Documents.Client.DocumentClient`. Connect to a Cosmos DB instance
+- `StackExchange.Redis.ConnectionMultiplexer`. Connect to Azure Redis Cache.
+
+These broker classes can be expensive to create. They are intended to be instantiated once and reused throughout the lifetime of an application. However, it's a common misunderstanding that these classes should acquired only as necessary and released quickly.
+
+The following ASP.NET example creates an instance of `HttpClient` to communicate with a remote service. You can find the complete sample [here][sample-app].
+
+```csharp
 public class NewHttpClientInstancePerRequestController : ApiController
 {
     // This method creates a new instance of HttpClient and disposes it for every call to GetProductAsync.
-
     public async Task<Product> GetProductAsync(string id)
     {
         using (var httpClient = new HttpClient())
         {
             var hostName = HttpContext.Current.Request.Url.Host;
             var result = await httpClient.GetStringAsync(string.Format("http://{0}:8080/api/...", hostName));
-
             return new Product { Name = result };
         }
     }
 }
 ```
 
-----------
+In a web application, this technique is not scalable. A new `HttpClient` object is created for each user request. Under heavy load, the web server may exhaust the number of available sockets, resulting in `SocketException` errors.
 
-**Note:** This code forms part of the [ImproperInstantiation sample application][fullDemonstrationOfProblem].
+This problem is not restricted to the `HttpClient` class. Other classes that wrap resources or are expensive to create might cause similar issues. The following example creates an instances of the `ExpensiveToCreateService` class. Here the issue is not necessarily socket exhaustion, but simply how long it takes to create each instance. Continually creating and destroying instances of this class might adversely affect the scalability of the system.
 
-----------
-
-In a web application this technique is not scalable. Each user request creates <<RBC: Are all those words necessary, or does this work?>> a new `HttpClient` object. Under a heavy load, the web server can exhaust
-the number of sockets available resulting in `SocketException` errors.
-
-This problem is not restricted to the `HttpClient` class. Creating many instances of
-other classes that wrap resources or are expensive to create might cause similar
-issues, or at least slow down the performance of the application as they are
-continually created and destroyed. Consider the following code
-showing an alternative implementation of the `GetProductAsync` method. This time the
-data is retrieved from an external service wrapped by using the
-`ExpensiveToCreateService` class.
-
-**C# Web API**
-``` C#
+```csharp
 public class NewServiceInstancePerRequestController : ApiController
 {
-    // This method creates a new instance of ProductRepository and disposes it for every call to GetProductAsync.
     public async Task<Product> GetProductAsync(string id)
     {
         var expensiveToCreateService = new ExpensiveToCreateService();
         return await expensiveToCreateService.GetProductByIdAsync(id);
     }
 }
+
+public class ExpensiveToCreateService
+{
+    public ExpensiveToCreateService()
+    {
+        // Simulate delay due to setup and configuration of ExpensiveToCreateService
+        Thread.SpinWait(Int32.MaxValue / 100);
+    }
+    ...
+}
 ```
 
-In this code, the `ExpensiveToCreateService` could be any shareable service or broker
-class that takes considerable effort to construct. As with the `HttpClient` example,
-continually creating and destroying instances of this class might adversely affect the
-scalability of the system.
+## How to fix the problem
 
-----------
+If the class that wraps the external resource is shareable and thread-safe, create a shared singleton instance or a pool of reusable instances of the class.
 
-**Note:** The key element of this antipattern is that an application repeatedly
-creates and destroys instances of a **shareable** object. If a class is not shareable
-(if it is not thread-safe), then this antipattern does not apply.
+The following following example uses a static `HttpClient` instance, thus sharing the connection across all requests.
 
-----------
+```csharp
+public class SingleHttpClientInstanceController : ApiController
+{
+    private static readonly HttpClient HttpClient;
+
+    static SingleHttpClientInstanceController()
+    {
+        HttpClient = new HttpClient();
+    }
+
+    // This method uses the shared instance of HttpClient for every call to GetProductAsync.
+    public async Task<Product> GetProductAsync(string id)
+    {
+        var hostName = HttpContext.Current.Request.Url.Host;
+        var result = await HttpClient.GetStringAsync(string.Format("http://{0}:8080/api/...", hostName));
+        return new Product { Name = result };
+    }
+}
+```
+
+## Considerations
+
+- The key element of this antipattern is repeatedly creating and destroying instances of a *shareable* object. If a class is not shareable (not thread-safe), then this antipattern does not apply.
+
+- The type of shared resource might dictate whether you should use a singleton or create a pool. The `HttpClient` class
+is designed to be shared rather than pooled. Other objects might support pooling, enabling the system to spread the workload across multiple instances.
+
+- Objects that you share across multiple requests *must* be thread-safe. The `HttpClient` class is designed to be used in this manner, but other classes might not support concurrent requests, so check the available documentation.
+
+- Some resource types are scarce and should not be held onto. Database connections are an example. Holding an open database connection that is not required may prevent other concurrent users from gaining access to the database.
+
+- In the .NET Framework, many objects that establish connections to external resources are created by using static factory methods of other classes that manage these connections. The objects intended to be saved and reused, rather than disposed and recreated. For example, in Azure Service Bus, the `QueueClient` object is created through a `MessagingFactory` object. Internally, the `MessagingFactory` managems connections. (See [Best Practices for performance improvements using Service Bus Messaging][service-bus-messaging]).
+
 
 ## How to detect the problem
 
-Symptoms of the *Improper Instantiation* problem include a drop in throughput,
-possibly with an increase in exceptions indicating exhaustion of related resources
-(sockets, database connections, file handles, and so on). End users are likely to
-report degraded performance and frequent request failures when the system is heavily
-utilized.
+Symptoms of this problem include a drop in throughput, possibly with an increase in exceptions indicating exhaustion of related resources such as sockets, database connections, file handles, and so on. 
 
 You can perform the following steps to help identify this problem:
 
@@ -203,104 +211,6 @@ the code or use profiling to find out how shareable objects are being instantiat
 used, and destroyed. Where appropriate, refactor the code to cache and reuse objects,
 as described in the following section.
 
-## How to correct the problem
-
-If the class wrapping the external resource is shareable and thread-safe, either
-create a shared singleton instance or a pool of reusable instances of the class. The
-following code snippet shows a simple example. The `SingleHttpClientInstance`
-controller performs the same operation as the `NewHttpClientInstancePerRequest`
-controller shown earlier, except that the `HttpClient` object is created once, in the
-constructor, rather than each time the `GetProductAsync` operation is invoked. This
-approach reuses the same `HttpClient` object sharing the connection across all
-requests.
-
-**C# Web API**
-```C#
-public class SingleHttpClientInstanceController : ApiController
-{
-    private static readonly HttpClient HttpClient;
-
-    static SingleHttpClientInstanceController()
-    {
-        HttpClient = new HttpClient();
-    }
-
-    // This method uses the shared instance of HttpClient for every call to GetProductAsync.
-    public async Task<Product> GetProductAsync(string id)
-    {
-        var hostName = HttpContext.Current.Request.Url.Host;
-        var result = await HttpClient.GetStringAsync(string.Format("http://{0}:8080/api/...", hostName));
-
-        return new Product { Name = result };
-    }
-}
-```
-
-----------
-
-**Note:** This code is available in the [sample solution][fullDemonstrationOfSolution]
-provided with this antipattern.
-
-----------
-
-Similarly, assuming that the `ExpensiveToCreateService` was also designed to be
-shareable, you can refactor the `NewServiceInstancePerRequest` controller in the same
-manner.
-
-**C# Web API**
-```C#
-public class SingleServiceInstanceController : ApiController
-{
-    private static readonly ExpensiveToCreateService ExpensiveToCreateService;
-
-    static SingleServiceInstanceController()
-    {
-        ExpensiveToCreateService = new ExpensiveToCreateService();
-    }
-
-    // This method uses the shared instance of ExpensiveToCreateService for every call to GetProductAsync.
-    public async Task<Product> GetProductAsync(string id)
-    {
-        return await ExpensiveToCreateService.GetProductByIdAsync(id);
-    }
-}
-```
-
-You should consider the following points:
-
-- The type of shared resource might dictate whether you should use a singleton or
-create a pool. The example shown above creates a single `ProductRepository` object,
-and by extension a single `HttpClient` object. This is because the `HttpClient` class
-is designed to be shared rather than pooled. Other types of objects might support
-pooling, enabling the system to spread the workload across multiple instances.
-
-- Objects that you share across multiple requests **must** be thread-safe. The
-`HttpClient` class is designed to be used in this manner, but other classes might not
-support concurrent requests, so check the available documentation.
-
-- In the .NET Framework, many objects that establish connections to external resources
-are created by using static factory methods of other classes that manage these
-connections. The objects created are intended to be saved and reused rather than being
-destroyed and recreated as required. For example, the
-[Best Practices for Performance Improvements Using Service Bus Brokered Messaging][best-practices-service-bus] page contains the following comment:
-
-----------
-
-Service Bus client objects, such as `QueueClient` or `MessageSender`, are created through a
-`MessagingFactory` object, which also provides internal management of connections. You should not
-close messaging factories or queue, topic, and subscription clients after you send a message, and
-then re-create them when you send the next message. Closing a messaging factory deletes the
-connection to the Service Bus service, and a new connection is established when recreating the
-factory. Establishing a connection is an expensive operation that can be avoided by re-using the
-same factory and client objects for multiple operations.
-
-----------
-
-- Only use this approach where it is appropriate. You should always release scarce resources once
-you have finished with them, and acquire them only on an as-needed basis. A common example is a
-database connection. Retaining an open connection that is not required may prevent other
-concurrent users from gaining access to the database.
-
 ## Consequences of the solution
 
 The system should be more scalable, offer a higher throughput (the system is wasting less time
@@ -341,9 +251,10 @@ time performing real work rather than opening and closing sockets.
 
 - [Redis ConnectionMultiplexer - Basic Usage][redis-multiplexer-usage]
 
-[fullDemonstrationOfProblem]: https://github.com/mspnp/performance-optimization/tree/master/ImproperInstantiation
-[fullDemonstrationOfSolution]: https://github.com/mspnp/performance-optimization/tree/master/ImproperInstantiation
-[best-practices-service-bus]: https://msdn.microsoft.com/library/hh528527.aspx
+[sample-app]: https://github.com/mspnp/performance-optimization/tree/master/ImproperInstantiation
+
+
+[service-bus-messaging]: /service-bus-messaging/service-bus-performance-improvements
 [performance-tips-documentdb]: http://blogs.msdn.com/b/documentdb/archive/2015/01/15/performance-tips-for-azure-documentdb-part-1.aspx
 [redis-multiplexer-usage]: https://github.com/StackExchange/StackExchange.Redis/blob/master/Docs/Basics.md
 [NewRelic]: http://newrelic.com/azure
