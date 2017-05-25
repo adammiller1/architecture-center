@@ -6,16 +6,14 @@ author: dragon119
 
 # Improper Instantiation antipattern
 
-
-
 ## Problem description
 
 Many .NET Framework libraries provide abstractions of external resources. Internally, these classes typically manage their own connections to the resource, acting as brokers that clients can use to access the resource. Here are some examples of this type of broker class that are relevant to Azure applications:
 
-- `System.Net.Http.HttpClient`. Communicate with a web service using HTTP.
-- `Microsoft.ServiceBus.Messaging.QueueClient`. Posting and receiving messages to a Service Bus queue. 
-- `Microsoft.Azure.Documents.Client.DocumentClient`. Connect to a Cosmos DB instance
-- `StackExchange.Redis.ConnectionMultiplexer`. Connect to Azure Redis Cache.
+- `System.Net.Http.HttpClient`. Communicates with a web service using HTTP.
+- `Microsoft.ServiceBus.Messaging.QueueClient`. Posts and receives messages to a Service Bus queue. 
+- `Microsoft.Azure.Documents.Client.DocumentClient`. Connects to a Cosmos DB instance
+- `StackExchange.Redis.ConnectionMultiplexer`. Connects to Redis, including Azure Redis Cache.
 
 These broker classes can be expensive to create. They are intended to be instantiated once and reused throughout the lifetime of an application. However, it's a common misunderstanding that these classes should acquired only as necessary and released quickly.
 
@@ -104,159 +102,74 @@ is designed to be shared rather than pooled. Other objects might support pooling
 
 ## How to detect the problem
 
-Symptoms of this problem include a drop in throughput, possibly with an increase in exceptions indicating exhaustion of related resources such as sockets, database connections, file handles, and so on. 
+Symptoms of this problem include a drop in throughput or an increased error rate, along with one or more of the following: 
+
+- An increase in exceptions that indicate exhaustion of resources such as sockets, database connections, file handles, and so on. 
+- Increased memory use and garbage collection.
+- An increase in network, disk, or database activity.
 
 You can perform the following steps to help identify this problem:
 
-1. Identify points at which response times slow down or the system fails due to lack
-of resources, by performing process monitoring of the production system.
+1. Performing process monitoring of the production system, to identify points when response times slow down or the system fails due to lack of resources.
+2. Examine the telemetry data captured at these points to determine which operations might be creating and destroying resource-consuming objects.
+3. Load test each suspected operation, in a controlled test environment rather than the production system.
+4. Review the source code and examine the how broker objects are managed.
 
-2. Examine the telemetry data captured at these points to determine which operations
-might be creating and destroying resource-consuming objects as the system slows down
-or fails.
+Look at stack traces for operations that are slow-running or that generate exceptions when the system is under load. This information can help to identify how these operations are utilizing resources. Exceptions can help to determine whether errors are caused by shared resources being exhausted. 
 
-3. Perform load testing of each of the operations identified by step 2. Use a
-controlled test environment rather than the production system.
+If you already have insight into the problem, you may be able to skip some of these steps. However, avoid making unfounded or biased assumptions. A thorough analysis can sometimes find unexpected causes of performance problems.
 
-4. Review the source code for the possible problematic <<RBC: Just saying possible seems too vague in this context. Does this work, or is there a better way to phrase this from a technical perspective?>> operations and examine the logic behind the
-the lifecycle of the broker objects being created and destroyed.
+## Example diagnosis
 
 The following sections apply these steps to the sample application described earlier.
 
-----------
+### Identify points of slow down or failure
 
-**Note:** If you already have an insight into where problems might lie, you may be
-able to skip some of these steps. However, you should avoid making unfounded or biased
-assumptions. Performing a thorough analysis can sometimes lead to the identification
-of unexpected causes of performance problems. The following sections are formulated to
-help you to examine applications and services systematically.
-
-----------
-
-### Identifying points of slow down or failure
-
-Instrumenting each operation in the production system to track the duration of each
-request and then monitoring the live system can help to provide an overall view of how
-the requests perform. You should monitor the system and track which operations are
-long-running or cause exceptions.
-
-The following image shows the Overview pane of the New Relic <<RBC: If you decide to do something based on my comments in other docs, this should match.>> monitor dashboard,
-highlighting operations that have a poor response time and the increased error rate
-that occurs while these operations are running. This telemetry was gathered while the
-system was undergoing load testing, but similar observations are likely to occur in
-the live system during periods of high usage. In this case, operations that
-invoke the `GetProductAsync` method in the `NewHttpClientInstancePerRequest`
-controller are worth investigating further.
+The following image shows results generated using [New Relic APM][new-relic], showing operations that have a poor response time. In this case, the `GetProductAsync` method in the `NewHttpClientInstancePerRequest` controller are worth investigating further. Notice that the error rate also increases these operations are running. 
 
 ![The New Relic monitor dashboard showing the sample application creating a new instance of an HttpClient object for each request][dashboard-new-HTTPClient-instance]
 
-You should also look for operations that trigger increased memory use and garbage
-collection, as well as raised levels of network, disk, or database activity as
-connections are made, files are opened, or database connections established.
+### Examine telemetry data and find correlations
 
-### Examining telemetry data and finding correlations
-
-You should examine stack trace information for operations that have been identified as
-slow-running or that generate exceptions when the system is under load. This
-information can help to identify how these operations are utilizing resources, and
-exception information can be used to determine whether errors are caused by the system
-exhausting shared resources. The image below shows data captured using thread
-profiling for the period corresponding to that shown in the previous image. Note that
-the system spends a significant time opening socket connections and even more time
-closing them and handling socket exceptions.
+The next image shows data captured using thread profiling, over the same period corresponding as the previous image. The system spends a significant time opening socket connections, and even more time closing them and handling socket exceptions.
 
 ![The New Relic thread profiler showing the sample application creating a new instance of an HttpClient object for each request][thread-profiler-new-HTTPClient-instance]
 
 ### Performing load testing
 
-You can use load testing based on workloads that emulate the typical sequence of
-operations that users might perform to help identify which parts of a system suffer
-from resource exhaustion under varying loads. You should perform these tests in a
-controlled environment rather than the production system. The following graph shows
-the throughput of requests directed at the `NewHttpClientInstancePerRequest`
-controller in the sample application as the user load is increased up to 100  
-concurrent users.
+Use load testing emulates the typical operations that users might perform. This can help to  identify which parts of a system suffer
+from resource exhaustion under varying loads. Perform these tests in a controlled environment rather than the production system. The following graph shows the throughput of requests handled by the `NewHttpClientInstancePerRequest` controller as the user load increases to 100 concurrent users.
 
 ![Throughput of the sample application creating a new instance of an HttpClient object for each request][throughput-new-HTTPClient-instance]
 
-The volume of requests handled per second increases at the 10-user point due to the
-increased workload up to approximately 30 users. At this point, the volume of
-successful requests reaches a limit and the system starts to generate exceptions. The
-volume of these exceptions gradually increases with the user load. These failures are
-reported by the load test as HTTP 500 (Internal Server) errors. Reviewing the
-telemetry (shown earlier) for this test case reveals that these errors are caused by
-the system running out of socket resources as more and more `HttpClient` objects are
-created.
+At first, the volume of requests handled per second increases the workload increases. At about 30 users, however, the volume of successful requests reaches a limit, and the system starts to generate exceptions. From then on, the volume of exceptions gradually increases with the user load. 
 
-The second graph below shows the results of a similar test performed using the
-`NewServiceInstancePerRequest` controller. This controller does not use `HttpClient`
-objects, but instead utilizes a custom object (`ExpensiveToCreateService`) to fetch
-data.
+The load test reported these failures as HTTP 500 (Internal Server) errors. Reviewing the telemetry showed that these errors were caused by the system running out of socket resources, as more and more `HttpClient` objects were created.
+
+The next graph shows a similar test for a controller that creates the custom `ExpensiveToCreateService` object.
 
 ![Throughput of the sample application creating a new instance of the ExpensiveToCreateService for each request][throughput-new-ExpensiveToCreateService-instance]
 
-This time, although the controller does not generate any exceptions, throughput still
-reaches a plateau while the average response time increases by a factor of 20 with
-user load. *Note that the scale for the response time and throughput are logarithmic,
-so the rate at which the response time grows is actually more dramatic than appears at
-first glance.* Examining the telemetry for this code reveals that the main causes of
-this limitation are the time and resources spent creating new instances of the
-`ExpensiveToCreateService` for each request.
+This time, the controller does not generate any exceptions, but throughput still reaches a plateau, while the average response time increases by a factor of 20. (The graph uses a logarithmic scale for response time and throughput.) Telemetry showed that creating new instances of the `ExpensiveToCreateService` was the main cause of the problem.
 
-### Reviewing the code
+### Implement the solution and verify the result
 
-Once you have managed to identify which parts of an application are causing the system
-to slow down or generate exceptions due to resource exhaustion, perform a review of
-the code or use profiling to find out how shareable objects are being instantiated,
-used, and destroyed. Where appropriate, refactor the code to cache and reuse objects,
-as described in the following section.
-
-## Consequences of the solution
-
-The system should be more scalable, offer a higher throughput (the system is wasting less time
-acquiring and releasing resources and is therefore able to spend more time doing useful work),
-and report fewer errors as the workload increases. The following graph shows the load test
-results for the sample application, using the same workload as before, but invoking the
-`GetProductAsync` method in the `SingleHttpClientInstance` controller.
+After switching the `GetProductAsync` method to share a single `HttpClient` instance, a second load test showed improved performance. No errors were reported, and the system was able to handle an increasing load of up to 500 requests per second. The average response time was cut in half, compared with the previous test.
 
 ![Throughput of the sample application reusing the same instance of an HttpClient object for each request][throughput-single-HTTPClient-instance]
 
-No errors were reported, and the system was able to handle an increasing load of up to
- <<RBC: It can't be up to and over. I'm guessing up to is correct.>> 500 requests per second. The volume of requests capable of being handled closely mirroring
-the user load. The average response time was close to half that of the previous test. The result
-is a system that is much more scalable than before.
-
-The next graph shows the results of the equivalent load test for the `SingleServiceInstance`
-controller. *Note that as before, the scale for the response time and throughput for this graph
-are logarithmic.*
-
-![Throughput of the sample application reusing the same instance of an HttpClient object for each request][throughput-single-ExpensiveToCreateService-instance]
-
-The volume of requests handled increases in line with the user load while the average response
-time remains low. This is similar to the profile of the code that creates a single `HttpClient`
-instance.
-
-For comparison purposes with the earlier test, the following image shows the stack trace
-telemetry for the `SingleHttpClientInstance` controller. This time the system spends most of its
-time performing real work rather than opening and closing sockets.
+For comparison, the following image shows the stack trace telemetry. This time, the system spends most of its time performing real work, rather than opening and closing sockets.
 
 ![The New Relic thread profiler showing the sample application creating single instance of an HttpClient object for all requests][thread-profiler-single-HTTPClient-instance]
 
+The next graph shows a similar load test using a shared instance of the `ExpensiveToCreateService` object. Again, the volume of handled requests increases in line with the user load, while the average response time remains low. 
 
-## Related resources
+![Throughput of the sample application reusing the same instance of an HttpClient object for each request][throughput-single-ExpensiveToCreateService-instance]
 
-- [Best Practices for Performance Improvements Using Service Bus Brokered Messaging][best-practices-service-bus].
 
-- [Performance Tips for Azure DocumentDB - Part 1][performance-tips-documentdb]
-
-- [Redis ConnectionMultiplexer - Basic Usage][redis-multiplexer-usage]
 
 [sample-app]: https://github.com/mspnp/performance-optimization/tree/master/ImproperInstantiation
-
-
 [service-bus-messaging]: /service-bus-messaging/service-bus-performance-improvements
-[performance-tips-documentdb]: http://blogs.msdn.com/b/documentdb/archive/2015/01/15/performance-tips-for-azure-documentdb-part-1.aspx
-[redis-multiplexer-usage]: https://github.com/StackExchange/StackExchange.Redis/blob/master/Docs/Basics.md
 [NewRelic]: http://newrelic.com/azure
 [AppDynamics]: http://www.appdynamics.co.uk/cloud/windows-azure
 [throughput-new-HTTPClient-instance]: _images/HttpClientInstancePerRequest.jpg

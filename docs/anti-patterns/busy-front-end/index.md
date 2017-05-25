@@ -128,7 +128,7 @@ You can perform the following steps to help identify this problem:
 1. Perform process monitoring of the production system, to identify points when response times slow down.
 2. Examine the telemetry data captured at these points to determine the mix of operations being performed and the resources being used. 
 3. Find any correlations between poor response times and the volumes and combinations of operations that were happening at those times.
-4. Perform load testing of each possible operation to identify which operations are consuming resources and starving other operations. 
+4. Load test each suspected operation to identify which operations are consuming resources and starving other operations. 
 5. Review the source code for those operations to determine why they might cause excessive resource consumption.
 
 If you already have insight into the problem, you may be able to skip some of these steps. However, avoid making unfounded or biased assumptions. A thorough analysis can sometimes find unexpected causes of performance problems. 
